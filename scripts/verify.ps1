@@ -28,13 +28,13 @@ try {
     Run-Native "cargo" @("test", "--workspace", "--all-targets", "--locked")
     Run-Native "cargo" @("test", "--workspace", "--doc", "--locked")
     Run-Native "cargo" @("clippy", "--workspace", "--all-targets", "--locked")
-    Run-Native "cargo" @("run", "--locked", "-p", "agent-demo", "--bin", "minimal")
-    Run-Native "cargo" @("run", "--locked", "-p", "agent-demo", "--bin", "memory")
-    Run-Native "cargo" @("run", "--locked", "-p", "agent-demo", "--bin", "planner")
-    Run-Native "cargo" @("run", "--locked", "-p", "agent-demo", "--bin", "generic_extensions")
+    Run-Native "cargo" @("run", "--locked", "-p", "demo", "--bin", "minimal")
+    Run-Native "cargo" @("run", "--locked", "-p", "demo", "--bin", "memory")
+    Run-Native "cargo" @("run", "--locked", "-p", "demo", "--bin", "planner")
+    Run-Native "cargo" @("run", "--locked", "-p", "demo", "--bin", "generic_extensions")
     if ($NativeTauri) {
-        Run-Native "cargo" @("check", "-p", "tauri-plugin-agent-bridge", "--features", "tauri", "--all-targets", "--locked")
-        Run-Native "cargo" @("check", "-p", "agent-tauri-composition", "--features", "tauri", "--locked")
+        Run-Native "cargo" @("check", "-p", "tauri-plugin-bridge", "--features", "tauri", "--all-targets", "--locked")
+        Run-Native "cargo" @("check", "-p", "tauri-composition", "--features", "tauri", "--locked")
     }
     $Passed = $true
     Write-Host "Offline verification finished. Keep Cargo.lock; review warnings; validate the real provider separately."

@@ -1,16 +1,16 @@
 [package]
-name = "agent-demo"
+name = "demo"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [dependencies]
-agent-api.workspace = true
-agent-core.workspace = true
-agent-providers.workspace = true
-agent-memory.workspace = true
-agent-planner.workspace = true
+api.workspace = true
+runtime.workspace = true
+providers.workspace = true
+memory.workspace = true
+planner.workspace = true
 async-trait.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

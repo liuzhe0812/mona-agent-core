@@ -1,6 +1,6 @@
-# v0.2 验收矩阵
+# 验收矩阵 · v0.3
 
-状态区分：**已执行通过**、**已写测试未执行**、**未覆盖/需人工联调**。
+状态区分：**已执行通过**、**已通过但仍需目标环境联调**、**未覆盖/需人工联调**。
 
 | 能力 | 本次状态 | 验收入口 |
 |---|---|---|
@@ -9,22 +9,22 @@
 | HTTP客户端鉴权header、游标、失败与取消订阅 | 已执行通过（mock） | http.test.mjs |
 | Tauri客户端首包竞态、ACK、超时、订阅清理 | 已执行通过（mock） | tauri.test.mjs |
 | TS客户端公共声明与两种实现可替换 | 已执行通过 | test/types.ts |
-| Rust基础编译与旧58项回归 | 已写测试未执行 | cargo test --workspace |
-| Rust公共流式契约/终态/Tool详情/不执行半成品参数 | 已写测试未执行 | core/api streaming测试 |
-| Application幂等/输入去重/取消/容量/回放/隐私 | 已写测试未执行 | application测试 |
-| Axum实际Router路径/HTTP Body/SSE | 已写测试未执行 | bridges/http/tests |
-| Rust Channel单包ACK/归属/超时 | 已写测试未执行（无原生WebView） | bridges/tauri/tests |
-| HTTP创建的任务经Tauri通道看到同一状态 | 已写测试未执行 | server/tests/shared_application.rs |
-| Tauri2原生命令、权限生成与宿主装配 | 未编译/需原生验收 | cargo check --features tauri；Windows CI |
-| 真实浏览器↔Rust HTTP、Tauri WebView↔Rust | 需端到端联调 | 启動示例/真实Tauri宿主 |
+| Rust基础编译与旧58项回归 | 已执行通过（cargo test --workspace --all-targets --offline） | Cargo workspace |
+| Rust公共流式契约/终态/Tool详情/不执行半成品参数 | 已执行通过 | api/runtime 测试 |
+| Application幂等/输入去重/取消/容量/回放/隐私 | 已执行通过 | application 测试 |
+| Axum实际Router路径/HTTP Body/SSE | 已执行通过 | packages/http-bridge/tests |
+| Rust Channel单包ACK/归属/超时 | 已执行通过（headless） | packages/tauri-bridge/tests |
+| HTTP创建的任务经Tauri通道看到同一状态 | 已执行通过 | apps/server/tests/shared_application.rs |
+| Tauri2原生命令、权限生成与宿主装配 | 已通过原生 feature 编译，未运行 GUI | cargo check -p tauri-composition --features tauri --locked |
+| Web 启动器与空模型设置页 | 已执行通过（隔离环境） | npm run dev:web；浏览器 smoke |
 | 真实模型流/授权/取消/特殊错误 | 未联调 | 配置真实测试端点 |
 | 高并发、代理缓冲、XSS/CSP、密钥与租户策略 | 需业务验证 | 压力和安全测试 |
 | 重启恢复/持久化幂等 | 未实现 | 不作为本版能力 |
 
-首次完成Rust构建后保存Cargo.lock、工具链版本、测试日志；修复编译/回归问题再做原生Tauri与真实模型联调。不能把Python静态检查或JS mock测试等同于完成Rust验收。
+当前工作树已完成 Rust workspace 测试、文档测试、服务无默认 feature 编译、Tauri 原生 feature 编译以及 Web 启动器和空设置页验收。真实付费供应商流、原生 Tauri 窗口交互、高并发与生产安全策略仍需在目标环境联调；不能把本地模拟端点或 JS mock 测试等同于这些验收。
 
 
-## v0.3 通用契约验收（已写测试，尚未执行Rust）
+## v0.3 通用契约验收（Rust workspace 已执行通过）
 
 | 范围 | 新测试/验收要求 |
 |---|---|

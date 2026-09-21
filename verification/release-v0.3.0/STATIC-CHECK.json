@@ -1,0 +1,135 @@
+{
+  "created_utc": "2026-09-20T16:53:53.916638+00:00",
+  "status": "passed_static_structure_checks",
+  "scope": "file, TOML/JSON, production dependency graph, native feature selection, module path, docs, test inventory, optional hashes",
+  "production_project_graph": {
+    "agent-bridge-http": [
+      "agent-api",
+      "agent-application"
+    ],
+    "tauri-plugin-agent-bridge": [
+      "agent-api",
+      "agent-application"
+    ],
+    "agent-api": [],
+    "agent-application": [
+      "agent-api"
+    ],
+    "agent-core": [
+      "agent-api"
+    ],
+    "agent-providers": [
+      "agent-api"
+    ],
+    "agent-demo": [
+      "agent-api",
+      "agent-core",
+      "agent-memory",
+      "agent-planner",
+      "agent-providers"
+    ],
+    "agent-server-example": [
+      "agent-api",
+      "agent-application",
+      "agent-bridge-http",
+      "agent-core",
+      "agent-demo",
+      "agent-providers"
+    ],
+    "agent-tauri-composition": [
+      "agent-api",
+      "agent-application",
+      "agent-core",
+      "tauri-plugin-agent-bridge"
+    ],
+    "agent-memory": [
+      "agent-api"
+    ],
+    "agent-planner": [
+      "agent-api"
+    ]
+  },
+  "rust_compilation": "not_performed",
+  "rust_test_execution": "not_performed",
+  "rust_type_or_semantic_validation": "not_performed",
+  "real_provider_acceptance": "not_performed",
+  "workspace_members": [
+    "crates/agent-api",
+    "crates/agent-core",
+    "crates/agent-providers",
+    "plugins/agent-memory",
+    "plugins/agent-planner",
+    "examples/demo",
+    "crates/agent-application",
+    "bridges/http",
+    "bridges/tauri",
+    "examples/server",
+    "examples/tauri-composition"
+  ],
+  "rust_source_files": 57,
+  "rust_physical_lines": 6235,
+  "authored_rust_tests": 143,
+  "checks": [
+    {
+      "name": "required_files",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "toml_parsing",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "workspace_paths_and_dependencies",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "production_dependency_direction",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "production_transitive_decoupling",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "tauri_native_is_explicitly_optional",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "json_files_parse",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "no_todo_or_unimplemented_macros",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "conventional_external_module_paths",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "authored_test_inventory",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "local_markdown_link_targets",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "delivery_sha256_manifest",
+      "passed": null,
+      "note": "not generated yet; hashes are generated after static report"
+    }
+  ],
+  "errors": []
+}

@@ -2,28 +2,29 @@
 
 ## 1. 定位
 
-这是库/SDK，不是必须运行的独立服务。目标是在权限和资源限制内执行一个任务，同时支持本机桌面与远程界面。默认 ReAct 只有一份；桥接不实现模型调用、工具执行或第二套循环。
+这是组件化库/SDK，不是必须运行的独立服务。目标是在权限和资源限制内执行一个任务，同时支持本机桌面与远程界面。默认 ReAct 只有一份；桥接不实现模型调用、工具执行或第二套循环。组件负责能力，公共 API 定义边界，宿主负责组合；Plugin 是可选的接入机制，不是所有组件的必需形态。
 
-### 包的生产依赖方向
+### 组件的生产依赖方向
 
 ```text
-agent-api ← agent-core
-agent-api ← agent-providers
-agent-api ← Memory / Planner 插件
-agent-api ← agent-application
-agent-api + agent-application ← Tauri Bridge
-agent-api + agent-application ← HTTP Bridge
+api ← runtime
+api ← providers
+api + providers ← models
+api ← Memory / Planner 组件
+api ← application
+api + application ← Tauri Bridge
+api + application ← HTTP Bridge
 ```
 
-组合根（Tauri 应用、server 示例、业务 CLI）可以依赖具体实现；内层包不能反向依赖组合根。`agent-application` 的测试会依赖 Core，**dev-dependencies 不是生产依赖反转**。
+组合根（`apps/server`、`apps/web` 宿主和 `examples/` 中的样例）可以依赖具体实现；内层包不能反向依赖组合根。`application` 的测试会依赖 Runtime，**dev-dependencies 不是生产依赖反转**。正式应用放在 `apps/`，可运行的组合样例放在 `examples/`。
 
 ## 2. 公共契约与执行基座
 
-`agent-api` 定义 `AgentExecutor`（只取最终报告）、`AgentRuntime`（启动流式运行）、`RunSession`（控制/订阅/快照/最终报告）以及 `RunHandle`。默认 Engine 实现这些接口。桥接只知道应用 API；应用 API 只知道 Runtime trait。
+`api` 定义 `AgentExecutor`（只取最终报告）、`AgentRuntime`（启动流式运行）、`RunSession`（控制/订阅/快照/最终报告）以及 `RunHandle`。默认 Engine 实现这些接口。桥接只知道应用 API；应用 API 只知道 Runtime trait。
 
 `RunHandle.events` 在执行启动前创建，避免“任务先输出，前端后订阅”丢首包。原始 RunSession.subscribe 只订阅未来事件，发生 Lagged 后获取快照并丢弃不新于快照的事件；需要回放的调用者使用应用层。
 
-Core 的职责仍是插件宿主、ReAct、模型网关、工具执行、上下文投影、运行控制和事件。工具默认独占，声明 ParallelSafe 后允许有界并行；结果按模型调用源顺序写回。完整参数、合法结束原因、完整传输、Schema 与权限检查全部通过后才能执行。
+Runtime 的职责仍是插件宿主、ReAct、模型网关、工具执行、上下文投影、运行控制和事件。工具默认独占，声明 ParallelSafe 后允许有界并行；结果按模型调用源顺序写回。完整参数、合法结束原因、完整传输、Schema 与权限检查全部通过后才能执行。
 
 ## 3. 统一应用层不是另一个 Runtime
 
@@ -69,25 +70,25 @@ Core 中序号分配、快照修改和 broadcast 发送在同一个短锁中完�
 
 ### HTTP
 
-`agent-bridge-http::router` 返回 Axum Router，不绑定端口、不创建 Engine。命令是 HTTP JSON，流是 SSE；无需同时实现 WebSocket。Bearer 校验、CORS、body 限制属于传输边界，任务行为属于 Application。
+`http-bridge::router` 返回 Axum Router，不绑定端口、不创建 Engine。命令是 HTTP JSON，流是 SSE；无需同时实现 WebSocket。Bearer 校验、CORS、body 限制属于传输边界，任务行为属于 Application。
 
 ### Tauri
 
-`tauri-plugin-agent-bridge` 的 `tauri` feature 提供真实 Tauri 2 插件命令。默认无 feature 时仍有可独立测试的 ChannelBridge，但这不等于原生 WebView 接入已验收。
+`tauri-plugin-bridge` 的 `tauri` feature 提供真实 Tauri 2 插件命令。默认无 feature 时仍有可独立测试的 ChannelBridge，但这不等于原生 WebView 接入已验收。
 
 IPC 每包包含 subscription_id、delivery_id、StreamFrame，前端处理后 ACK；最多一个 IPC 包在途。慢消费者不会无限塞满 Tauri 队列，而可能在下一次读取时收到恢复快照。ACK 超时仅结束订阅，不取消任务。原生命令验证宿主注入的 WebView label，并配合 Tauri capability 限定可信本地界面。
 
-## 6. 生命周期与插件
+## 6. 生命周期与组件接入
 
-PluginHost 启动时检查接口版本、服务依赖和冲突，安装失败回滚，注册表在运行期间冻结。Host shutdown 顺序是禁止接入、取消/排空 Run、撤销注册、逆序关闭资源。
+组件可以通过普通 API 直接被宿主调用；需要运行时注册或统一生命周期时，再通过 `PluginHost` 接入。PluginHost 启动时检查接口版本、服务依赖和冲突，安装失败回滚，注册表在运行期间冻结。Host shutdown 顺序是禁止接入、取消/排空 Run、撤销注册、逆序关闭资源。Plugin 入口保持薄，不复制组件能力实现。
 
 Application shutdown 停止自己的接入并取消/等待任务；**组合根随后负责 Host.shutdown**。桥接移除或界面订阅断开不应顺手关闭共享 Application，更不能取消另一个入口仍在观察的任务。
 
-Memory 和 Planner 不因本次更新搬入 Core。Planner 仍通过 AgentExecutor 多次调用同一执行器；本版没有为 Planner 提供复合任务流/子 Run 聚合协议。
+Memory 和 Planner 作为可选组件留在 `packages/`，不搬入 Runtime。它们可以提供普通 API，必要时再提供 Plugin 入口。Planner 仍通过 AgentExecutor 多次调用同一执行器；本版没有为 Planner 提供复合任务流/子 Run 聚合协议。
 
 ## 7. 实现范围与明确缺项
 
-已写源码：公开流式 Runtime 契约、工作项事件/原子快照、通用工具详情、统一 Application、内存回放、HTTP 桥接、Tauri 原生绑定与 ACK 通道、JS 客户端与 reducer。
+已写源码：公开流式 Runtime 契约、工作项事件/原子快照、通用工具详情、统一 Application、内存回放、HTTP/Tauri 桥接、模型管理组件、JS 客户端与 reducer。
 
 未实现：完整聊天会话/thread、持久化事件/WAL、崩溃继续执行、自动重新规划、真实代码 diff 工具、标准审批服务、WebSocket、完整桌面 UI、WASM/热加载、多租户安全沙箱、JEV 决策层。
 
@@ -107,7 +108,7 @@ Memory 和 Planner 不因本次更新搬入 Core。Planner 仍通过 AgentExecut
 - Content/ContentBlock、ToolOutput和ToolResult是模型/工具数据，不是UIDTO。UiToolResult保持v2文本投影。
 - ToolSelector只决定本轮可用名字；RunRequest.allowed_tools和最终宿主授权是不同关口。
 - CheckpointSink由外部实现；内部Checkpoints只管理单Run序号、快照和确认，不管理数据库。
-- ModelOptions/ProviderData经统一网关继承、检查、预算和审计。不同Provider的编码在agent-providers或外部适配器处理。
+- ModelOptions/ProviderData经统一网关继承、检查、预算和审计。不同Provider的编码在providers或外部适配器处理。
 
 无新常驻服务，无第二套Agent循环，无Mona类型。没有新增第三方依赖；更丰富的类型和测试带来源码增长，不以行数替代交付验证。
 

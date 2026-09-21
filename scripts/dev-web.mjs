@@ -2,17 +2,18 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, extname, resolve, sep } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
-const webRoot = resolve(root, 'ui');
+const webRoot = resolve(root, 'apps', 'web');
 const CONFIG_PATH = '/__mona_dev_config__.json';
 const HEALTH_PATH = '/__mona_dev_health__';
-const STATIC_PREFIXES = ['/ui/', '/clients/javascript/src/'];
+const STATIC_PREFIXES = ['/apps/web/', '/packages/client/src/'];
 const MIME = new Map([
   ['.html', 'text/html; charset=utf-8'],
   ['.mjs', 'text/javascript; charset=utf-8'],
@@ -100,9 +101,12 @@ function validateToken(token) {
 }
 
 export function resolveDevConfig(env = process.env) {
-  const missing = ['AGENT_MODEL_ENDPOINT', 'AGENT_MODEL_NAME'].filter((key) => !env[key]?.trim());
-  if (missing.length) {
-    throw new Error(`缺少 ${missing.join('、')}。请复制 .env.example 为 .env 并填写真实模型配置。`);
+  const modelManagement = env.AGENT_MODEL_MANAGEMENT !== '0';
+  if (!modelManagement) {
+    const missing = ['AGENT_MODEL_ENDPOINT', 'AGENT_MODEL_NAME'].filter((key) => !env[key]?.trim());
+    if (missing.length) {
+      throw new Error(`固定模型模式缺少 ${missing.join('、')}。启用模型管理可直接在 Web UI 中配置。`);
+    }
   }
 
   const webHost = env.MONA_WEB_HOST?.trim() || '127.0.0.1';
@@ -114,6 +118,10 @@ export function resolveDevConfig(env = process.env) {
   const token = validateToken(env.AGENT_SERVER_TOKEN?.trim() || randomBytes(32).toString('base64url'));
   const uiHostForUrl = webHost === '::1' || webHost === '[::1]' ? '[::1]' : webHost;
   const uiOrigin = `http://${uiHostForUrl}:${webPort}`;
+  const stateDirectory = resolve(env.MONA_DEV_STATE_DIR?.trim()
+    || (process.platform === 'win32' && env.LOCALAPPDATA
+      ? resolve(env.LOCALAPPDATA, 'mona-agent-core')
+      : resolve(env.XDG_STATE_HOME?.trim() || resolve(homedir(), '.local', 'state'), 'mona-agent-core')));
 
   return {
     webHost,
@@ -130,7 +138,37 @@ export function resolveDevConfig(env = process.env) {
       86400,
     ) * 1000,
     cargoBin: env.CARGO?.trim() || 'cargo',
+    modelManagement,
+    stateDirectory,
+    modelSettingsPath: resolve(env.AGENT_MODEL_SETTINGS_PATH?.trim() || resolve(stateDirectory, 'model-settings.enc')),
   };
+}
+
+function validateStoreKey(value) {
+  if (typeof value !== 'string' || value.length < 16 || value.length > 512 || !/^[\x21-\x7e]+$/.test(value)) {
+    throw new Error('本地模型设置密钥无效；删除开发状态目录中的 model-store.key 后重新启动。');
+  }
+  return value;
+}
+
+/** Create a stable local-development key once; production hosts inject their own key. */
+export async function ensureDevStoreKey(directory) {
+  await mkdir(directory, { recursive: true });
+  const path = resolve(directory, 'model-store.key');
+  try {
+    return validateStoreKey((await readFile(path, 'utf8')).trim());
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  const generated = randomBytes(32).toString('base64url');
+  try {
+    await writeFile(path, `${generated}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    if (process.platform !== 'win32') await chmod(path, 0o600);
+    return generated;
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    return validateStoreKey((await readFile(path, 'utf8')).trim());
+  }
 }
 
 function writeResponse(response, status, type, body, method = 'GET', cache = 'no-store') {
@@ -161,7 +199,7 @@ function safeStaticPath(pathname) {
   if (decoded.includes('\0') || decoded.split('/').includes('..')) return null;
 
   const candidate = resolve(root, `.${decoded}`);
-  const allowedRoots = [webRoot, resolve(root, 'clients', 'javascript', 'src')];
+  const allowedRoots = [webRoot, resolve(root, 'packages', 'client', 'src')];
   if (!allowedRoots.some((allowed) => candidate === allowed || candidate.startsWith(`${allowed}${sep}`))) {
     return null;
   }
@@ -304,7 +342,7 @@ export async function main() {
   await loadDotEnv();
   const config = resolveDevConfig();
   if (!existsSync(resolve(webRoot, 'index.html'))) {
-    throw new Error('缺少 ui/index.html，无法启动标准 Web UI。');
+    throw new Error('缺少 apps/web/index.html，无法启动标准 Web UI。');
   }
 
   const childEnv = {
@@ -313,6 +351,11 @@ export async function main() {
     AGENT_SERVER_ADDR: config.serverAddress,
     AGENT_UI_ORIGIN: config.uiOrigin,
   };
+  if (config.modelManagement) {
+    childEnv.AGENT_MODEL_STORE_KEY = process.env.AGENT_MODEL_STORE_KEY?.trim()
+      || await ensureDevStoreKey(config.stateDirectory);
+    childEnv.AGENT_MODEL_SETTINGS_PATH = config.modelSettingsPath;
+  }
 
   const uiServer = await startUiServer({
     host: config.webHost,
@@ -337,10 +380,10 @@ export async function main() {
     console.log(`- Web UI:       ${config.uiOrigin}`);
     console.log(`- Agent API:    ${config.endpoint}`);
     console.log('- Bridge token: 已临时生成/读取，不会输出到终端');
-    console.log('- Runtime:      真实模型模式（无假模型命令）');
+    console.log(`- Runtime:      ${config.modelManagement ? '模型管理模式（首次在设置页配置）' : '固定模型模式'}`);
     console.log('\n正在启动并等待 Rust Runtime；首次 cargo 编译可能需要几分钟……\n');
 
-    runtime = spawn(config.cargoBin, ['run', '-p', 'agent-server-example'], {
+    runtime = spawn(config.cargoBin, ['run', '-p', 'server'], {
       cwd: root,
       env: childEnv,
       stdio: 'inherit',

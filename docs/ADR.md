@@ -58,3 +58,4 @@
 | ADR-040 | 模型工具结果与UI DTO分离，UI协议保持2 | 图片卡片和附件上传留给应用 |
 | ADR-041 | 超限富结果明确失败，不剪碎媒体 | 应用需设置媒体预算或归档/缩放 |
 | ADR-042 | 公共ModelOptions继承默认值，凭据/端点仍为宿主配置 | 不做自动模型路由和参数能力发现 |
+| ADR-043 | 组件按 `packages/` 组织并使用短命名，Plugin 作为可选薄入口；正式应用放 `apps/`，样例放 `examples/` | 能力可由普通 API 直接使用，宿主按需组合；源码包名迁移与 Tauri `bridge` namespace 同步，执行流程、任务 payload 和 UI stream v2 不变 |

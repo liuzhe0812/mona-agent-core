@@ -1,7 +1,7 @@
-use agent_api::{Result, RunStatus};
-use agent_core::HostBuilder;
-use agent_demo::{text, ScriptedModel};
-use agent_planner::{PlanRequest, Planner, PlannerPlugin, PLANNER_SERVICE};
+use api::{Result, RunStatus};
+use runtime::HostBuilder;
+use demo::{text, ScriptedModel};
+use planner::{PlanRequest, Planner, PlannerPlugin, PLANNER_SERVICE};
 use std::sync::Arc;
 
 #[tokio::main]

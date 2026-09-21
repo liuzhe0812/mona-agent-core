@@ -31,13 +31,13 @@ cargo test --workspace --all-targets --locked
 cargo test --workspace --doc --locked
 # Clippy warnings are reported, not silently treated as passed production review.
 cargo clippy --workspace --all-targets --locked
-cargo run --locked -p agent-demo --bin minimal
-cargo run --locked -p agent-demo --bin memory
-cargo run --locked -p agent-demo --bin planner
-cargo run --locked -p agent-demo --bin generic_extensions
+cargo run --locked -p demo --bin minimal
+cargo run --locked -p demo --bin memory
+cargo run --locked -p demo --bin planner
+cargo run --locked -p demo --bin generic_extensions
 if [ "$native_tauri" = true ]; then
-  cargo check -p tauri-plugin-agent-bridge --features tauri --all-targets --locked
-  cargo check -p agent-tauri-composition --features tauri --locked
+  cargo check -p tauri-plugin-bridge --features tauri --all-targets --locked
+  cargo check -p tauri-composition --features tauri --locked
 fi
 printf '%s\n' "$native_tauri" > verification/native-tauri-requested.txt
 printf 'Verification finished: '; date -u

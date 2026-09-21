@@ -44,167 +44,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agent-api"
-version = "0.3.0"
-dependencies = [
- "async-trait",
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "agent-application"
-version = "0.3.0"
-dependencies = [
- "agent-api",
- "agent-core",
- "agent-demo",
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "agent-bridge-http"
-version = "0.3.0"
-dependencies = [
- "agent-api",
- "agent-application",
- "agent-core",
- "agent-demo",
- "axum",
- "futures-util",
- "http-body-util",
- "serde",
- "serde_json",
- "subtle",
- "tokio",
- "tower",
- "tower-http",
-]
-
-[[package]]
-name = "agent-core"
-version = "0.3.0"
-dependencies = [
- "agent-api",
- "agent-memory",
- "agent-planner",
- "async-trait",
- "futures-util",
- "jsonschema",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "agent-demo"
-version = "0.3.0"
-dependencies = [
- "agent-api",
- "agent-core",
- "agent-memory",
- "agent-planner",
- "agent-providers",
- "async-trait",
- "futures-util",
- "serde_json",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "agent-memory"
-version = "0.3.0"
-dependencies = [
- "agent-api",
- "async-trait",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "agent-model-manager"
-version = "0.3.0"
-dependencies = [
- "aes-gcm",
- "agent-api",
- "agent-core",
- "agent-providers",
- "futures-util",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "agent-planner"
-version = "0.3.0"
-dependencies = [
- "agent-api",
- "async-trait",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "agent-providers"
-version = "0.3.0"
-dependencies = [
- "agent-api",
- "async-trait",
- "bytes",
- "futures-util",
- "reqwest 0.12.28",
- "serde_json",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "agent-server-example"
-version = "0.3.0"
-dependencies = [
- "agent-api",
- "agent-application",
- "agent-bridge-http",
- "agent-core",
- "agent-demo",
- "agent-model-manager",
- "agent-providers",
- "axum",
- "futures-util",
- "http-body-util",
- "serde",
- "serde_json",
- "subtle",
- "tauri-plugin-agent-bridge",
- "tokio",
- "tower",
- "tower-http",
-]
-
-[[package]]
-name = "agent-tauri-composition"
-version = "0.3.0"
-dependencies = [
- "agent-api",
- "agent-application",
- "agent-core",
- "tauri",
- "tauri-plugin-agent-bridge",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -241,6 +80,31 @@ name = "anyhow"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+
+[[package]]
+name = "api"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "application"
+version = "0.3.0"
+dependencies = [
+ "api",
+ "demo",
+ "futures-util",
+ "runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "async-trait"
@@ -787,6 +651,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10d60334b3b2e7c9d91ef8150abfb6fa4c1c39ebbcf4a81c2e346aad939fee3e"
 dependencies = [
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "demo"
+version = "0.3.0"
+dependencies = [
+ "api",
+ "async-trait",
+ "futures-util",
+ "memory",
+ "planner",
+ "providers",
+ "runtime",
+ "serde_json",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -1478,6 +1358,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-bridge"
+version = "0.3.0"
+dependencies = [
+ "api",
+ "application",
+ "axum",
+ "demo",
+ "futures-util",
+ "http-body-util",
+ "runtime",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tokio",
+ "tower",
+ "tower-http",
+]
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2035,6 +1934,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "memory"
+version = "0.3.0"
+dependencies = [
+ "api",
+ "async-trait",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2069,6 +1978,23 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "models"
+version = "0.3.0"
+dependencies = [
+ "aes-gcm",
+ "api",
+ "futures-util",
+ "providers",
+ "reqwest 0.12.28",
+ "runtime",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -2401,6 +2327,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
+name = "planner"
+version = "0.3.0"
+dependencies = [
+ "api",
+ "async-trait",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "plist"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2538,6 +2474,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "providers"
+version = "0.3.0"
+dependencies = [
+ "api",
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "reqwest 0.12.28",
+ "serde_json",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -2822,6 +2772,22 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "runtime"
+version = "0.3.0"
+dependencies = [
+ "api",
+ "async-trait",
+ "futures-util",
+ "jsonschema",
+ "memory",
+ "planner",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -3168,6 +3134,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "server"
+version = "0.3.0"
+dependencies = [
+ "api",
+ "application",
+ "axum",
+ "demo",
+ "futures-util",
+ "http-body-util",
+ "http-bridge",
+ "models",
+ "providers",
+ "runtime",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tauri-plugin-bridge",
+ "tokio",
+ "tower",
+ "tower-http",
+]
+
+[[package]]
 name = "servo_arc"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3482,6 +3471,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-composition"
+version = "0.3.0"
+dependencies = [
+ "api",
+ "application",
+ "runtime",
+ "tauri",
+ "tauri-plugin-bridge",
+]
+
+[[package]]
 name = "tauri-macros"
 version = "2.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3512,13 +3512,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "tauri-plugin-agent-bridge"
+name = "tauri-plugin-bridge"
 version = "0.3.0"
 dependencies = [
- "agent-api",
- "agent-application",
- "agent-core",
- "agent-demo",
+ "api",
+ "application",
+ "demo",
+ "runtime",
  "serde",
  "serde_json",
  "tauri",

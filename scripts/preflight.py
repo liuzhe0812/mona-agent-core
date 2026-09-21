@@ -40,7 +40,7 @@ def check_package() -> dict:
         "docs/REFERENCES.md", "verification-environment.txt",
         "docs/BRIDGES.zh-CN.md", "docs/APPLICATION-API.zh-CN.md", "docs/STREAMING-PROTOCOL.zh-CN.md",
         "docs/MIGRATION-0.2.zh-CN.md", "docs/MIGRATION-0.3.zh-CN.md",
-        "docs/GENERIC-CORE-BOUNDARY.zh-CN.md", "docs/CONTENT-AND-PROVIDERS.zh-CN.md", "docs/CHECKPOINTS.zh-CN.md", "docs/SECURITY.zh-CN.md", "clients/javascript/package.json",
+        "docs/GENERIC-CORE-BOUNDARY.zh-CN.md", "docs/CONTENT-AND-PROVIDERS.zh-CN.md", "docs/CHECKPOINTS.zh-CN.md", "docs/SECURITY.zh-CN.md", "packages/client/package.json",
         "scripts/verify.sh", "scripts/verify.ps1", ".github/workflows/ci.yml",
     ]
     record("required_files", [f"missing {path}" for path in required if not (ROOT / path).is_file()])
@@ -103,10 +103,11 @@ def check_package() -> dict:
             if actual in paths_by_name: edges.add(actual)
         graph[name] = edges
     allowed = {
-        "agent-api": set(), "agent-core": {"agent-api"}, "agent-providers": {"agent-api"},
-        "agent-application": {"agent-api"}, "agent-memory": {"agent-api"}, "agent-planner": {"agent-api"},
-        "agent-bridge-http": {"agent-api", "agent-application"},
-        "tauri-plugin-agent-bridge": {"agent-api", "agent-application"},
+        "api": set(), "runtime": {"api"}, "providers": {"api"},
+        "application": {"api"}, "memory": {"api"}, "planner": {"api"},
+        "http-bridge": {"api", "application"},
+        "tauri-plugin-bridge": {"api", "application"},
+        "models": {"api", "providers"},
     }
     problems = []
     for name, permitted in allowed.items():
@@ -123,12 +124,12 @@ def check_package() -> dict:
         for dep in reached - allowed[root_name]:
             problems.append(f"{root_name}: forbidden transitive project dependency {dep}")
     record("production_transitive_decoupling", problems)
-    tauri = manifests.get(ROOT / "bridges/tauri/Cargo.toml", {})
+    tauri = manifests.get(ROOT / "packages/tauri-bridge/Cargo.toml", {})
     record("tauri_native_is_explicitly_optional", [] if (
         tauri.get("features", {}).get("default") == []
         and tauri.get("dependencies", {}).get("tauri", {}).get("optional")
         and tauri.get("build-dependencies", {}).get("tauri-plugin", {}).get("optional")
-        and not any(m.startswith("bridges/") for m in workspace.get("default-members", []))
+        and not any(m in {"packages/http-bridge", "packages/tauri-bridge"} for m in workspace.get("default-members", []))
     ) else ["native Tauri or bridge default selection is not optional"])
     problems = []
     for path in ROOT.rglob("*.json"):
@@ -151,6 +152,13 @@ def check_package() -> dict:
         # Only checks conventional external module files, not the Rust grammar.
         for match in re.finditer(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;", text, re.MULTILINE):
             name = match.group(1)
+            attributes = re.search(r"((?:#\[[^\n]*\]\s*)+)$", text[:match.start()].rstrip())
+            explicit_path = re.search(r'#\[path\s*=\s*"([^"]+)"\]', attributes.group(1)) if attributes else None
+            if explicit_path:
+                target = (path.parent / explicit_path.group(1)).resolve()
+                if not target.is_relative_to(ROOT) or not target.is_file():
+                    module_problems.append(f"{rel}: missing/unsafe explicit module path {name}")
+                continue
             if not (path.parent / f"{name}.rs").is_file() and not (path.parent / name / "mod.rs").is_file():
                 module_problems.append(f"{rel}: missing module file {name}")
     record("no_todo_or_unimplemented_macros", problems)

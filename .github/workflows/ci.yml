@@ -48,9 +48,9 @@ jobs:
       - name: Check actual Tauri commands and composition
         shell: pwsh
         run: |
-          cargo check -p tauri-plugin-agent-bridge --features tauri --all-targets
+          cargo check -p tauri-plugin-bridge --features tauri --all-targets
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo check -p agent-tauri-composition --features tauri
+          cargo check -p tauri-composition --features tauri
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   client-types:
     runs-on: ubuntu-latest
@@ -60,4 +60,5 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/test-clients.mjs
-      - run: npx --yes --package typescript@5.8.3 tsc -p clients/javascript/tsconfig.json
+      - run: npm run test:web
+      - run: npx --yes --package typescript@5.8.3 tsc -p packages/client/tsconfig.json

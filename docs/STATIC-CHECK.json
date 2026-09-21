@@ -1,52 +1,57 @@
 {
-  "created_utc": "2026-09-20T16:53:53.916638+00:00",
+  "created_utc": "2026-09-21T15:41:45.077713+00:00",
   "status": "passed_static_structure_checks",
   "scope": "file, TOML/JSON, production dependency graph, native feature selection, module path, docs, test inventory, optional hashes",
   "production_project_graph": {
-    "agent-bridge-http": [
-      "agent-api",
-      "agent-application"
+    "server": [
+      "api",
+      "application",
+      "demo",
+      "http-bridge",
+      "models",
+      "providers",
+      "runtime"
     ],
-    "tauri-plugin-agent-bridge": [
-      "agent-api",
-      "agent-application"
+    "demo": [
+      "api",
+      "memory",
+      "planner",
+      "providers",
+      "runtime"
     ],
-    "agent-api": [],
-    "agent-application": [
-      "agent-api"
+    "tauri-composition": [
+      "api",
+      "application",
+      "runtime",
+      "tauri-plugin-bridge"
     ],
-    "agent-core": [
-      "agent-api"
+    "api": [],
+    "application": [
+      "api"
     ],
-    "agent-providers": [
-      "agent-api"
+    "http-bridge": [
+      "api",
+      "application"
     ],
-    "agent-demo": [
-      "agent-api",
-      "agent-core",
-      "agent-memory",
-      "agent-planner",
-      "agent-providers"
+    "memory": [
+      "api"
     ],
-    "agent-server-example": [
-      "agent-api",
-      "agent-application",
-      "agent-bridge-http",
-      "agent-core",
-      "agent-demo",
-      "agent-providers"
+    "models": [
+      "api",
+      "providers"
     ],
-    "agent-tauri-composition": [
-      "agent-api",
-      "agent-application",
-      "agent-core",
-      "tauri-plugin-agent-bridge"
+    "planner": [
+      "api"
     ],
-    "agent-memory": [
-      "agent-api"
+    "providers": [
+      "api"
     ],
-    "agent-planner": [
-      "agent-api"
+    "runtime": [
+      "api"
+    ],
+    "tauri-plugin-bridge": [
+      "api",
+      "application"
     ]
   },
   "rust_compilation": "not_performed",
@@ -54,21 +59,22 @@
   "rust_type_or_semantic_validation": "not_performed",
   "real_provider_acceptance": "not_performed",
   "workspace_members": [
-    "crates/agent-api",
-    "crates/agent-core",
-    "crates/agent-providers",
-    "plugins/agent-memory",
-    "plugins/agent-planner",
+    "packages/api",
+    "packages/runtime",
+    "packages/providers",
+    "packages/memory",
+    "packages/planner",
     "examples/demo",
-    "crates/agent-application",
-    "bridges/http",
-    "bridges/tauri",
-    "examples/server",
-    "examples/tauri-composition"
+    "packages/application",
+    "packages/http-bridge",
+    "packages/tauri-bridge",
+    "apps/server",
+    "examples/tauri-composition",
+    "packages/models"
   ],
-  "rust_source_files": 57,
-  "rust_physical_lines": 6235,
-  "authored_rust_tests": 143,
+  "rust_source_files": 61,
+  "rust_physical_lines": 8118,
+  "authored_rust_tests": 161,
   "checks": [
     {
       "name": "required_files",

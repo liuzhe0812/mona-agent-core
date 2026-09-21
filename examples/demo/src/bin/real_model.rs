@@ -1,7 +1,7 @@
-use agent_api::{AgentError, ErrorCode, Result, RunRequest};
-use agent_core::HostBuilder;
-use agent_demo::{display_run, Add};
-use agent_providers::{ChatConfig, ChatModel};
+use api::{AgentError, ErrorCode, Result, RunRequest};
+use runtime::HostBuilder;
+use demo::{display_run, Add};
+use providers::{ChatConfig, ChatModel};
 use std::{env, sync::Arc};
 
 fn required(key: &str) -> Result<String> {

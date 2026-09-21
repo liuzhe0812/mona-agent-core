@@ -2,7 +2,7 @@
 
 ## 0. 本地 Web 一键组合
 
-仓库根目录的 `npm run dev:web` 是 HTTP Bridge 的本地开发组合入口。它读取 `.env`，启动真实 `agent-server-example` 与标准 Web UI，临时生成 Bridge Token，并在 Runtime 就绪后自动连接。没有假模型的 `dev:web:demo` 命令。
+仓库根目录的 `npm run dev:web` 是 HTTP Bridge 的标准本地开发入口。它可选读取 `.env` 覆盖，启动真实 `server` 与正式通用 Web UI，生成本地 Bridge Token，并在 Runtime 就绪后自动连接。首次模型配置在设置页完成，没有假模型的 `dev:web:demo` 命令。
 
 该启动器只允许环回地址，不替代生产 TLS、账户认证或多租户网关。详见 [本地开发文档](DEVELOPMENT.zh-CN.md)。
 
@@ -17,7 +17,7 @@
 
 ## 2. HTTP Bridge
 
-包名 `agent-bridge-http`。`router(application, HttpConfig)` 返回 Axum Router。宿主负责选择监听地址、TLS、用户认证和 graceful shutdown。示例服务只绑定环回地址。
+包名 `http-bridge`。`router(application, HttpConfig)` 返回 Axum Router。宿主负责选择监听地址、TLS、用户认证和 graceful shutdown。示例服务只绑定环回地址。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -38,13 +38,13 @@
 
 ## 3. Tauri Bridge
 
-目录 `bridges/tauri`，实际 Cargo 包名 **tauri-plugin-agent-bridge**；工作区内别名 agent-bridge-tauri。
+目录 `packages/tauri-bridge`，实际 Cargo 包名 **tauri-plugin-bridge**；工作区内别名 tauri-bridge。
 
 - 默认 feature 为空：可测试 ChannelBridge，不引入原生 WebView 依赖。
 - 开启 `tauri`：编译真实 `init<R: Runtime>`、九个 Command、原生 ChannelSink、权限生成 build.rs。
 - 用宿主的 Tauri Builder 安装插件；示例装配函数在 `examples/tauri-composition`。
-- plugin 名称是 agent-bridge；前端调用路径 `plugin:agent-bridge|start_task` 等。
-- capability 为受信任的本地窗口授权 `agent-bridge:default`，此外 Core bridge 还检查允许的 WebView label。示例只允许 main。
+- plugin 名称是 `bridge`；前端调用路径 `plugin:bridge|start_task` 等。
+- capability 为受信任的本地窗口授权 `bridge:default`，此外 bridge 还检查允许的 WebView label。示例只允许 main。
 
 九个命令：start_task、cancel_task、send_input、get_snapshot、get_result、forget_run、subscribe_events、ack_event、unsubscribe_events。字段经 Tauri 默认 camelCase 参数映射，例如 runId、onEvent、subscriptionId、deliveryId；内部 DTO字段仍是 request_id/run_id。
 
@@ -56,7 +56,7 @@ Tauri 原生构建需要对应操作系统开发工具、WebView/GUI依赖。Win
 
 ## 4. 前端与业务扩展
 
-`clients/javascript` 提供 HTTP/Tauri 两个实现，具有同一 AgentClient 方法集合和 RunView。换传输不必重写事件 reducer。使用 Tauri 客户端时由宿主显式传入 @tauri-apps/api 的 invoke 和 Channel；纯 Web 构建不因此自动依赖 Tauri SDK。
+`packages/client` 提供 HTTP/Tauri 两个实现，具有同一 AgentClient 方法集合和 RunView。换传输不必重写事件 reducer。使用 Tauri 客户端时由宿主显式传入 @tauri-apps/api 的 invoke 和 Channel；纯 Web 构建不因此自动依赖 Tauri SDK。
 
 Coding diff、计划卡片、审批页面等真实业务 UI 仍需业务实现。Core 已提供工具详情 JSON 入口，不宣称拥有这些业务功能。工具侧的秘密、文件路径和原始输出应在适当层治理，再允许前端查看。
 

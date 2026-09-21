@@ -1,37 +1,34 @@
 # 交付报告 · v0.3.1
 
+本文记录 Web 组合入口与组件目录迁移后的当前验证范围；未覆盖的生产联调仍需在目标环境完成。
+
 ## 本次实际更新
 
 在 v0.3 通用 Core 契约上增加标准 Web UI 的本地开发组合入口：根命令 `npm run dev:web` 同时启动真实 Rust Runtime、HTTP/SSE Bridge 与 Web UI，并自动完成本机连接。
 
-本次没有增加第二套 Agent Runtime，也没有提供假模型的 `dev:web:demo`。模型配置缺失时启动器直接失败。
+本次没有增加第二套 Agent Runtime，也没有提供假模型的 `dev:web:demo`。模型配置为空时启动器仍可打开设置页，发送任务前必须完成真实供应商配置。
 
-## 本次实际执行的检查
+## 当前已执行的检查
 
-- Node 22.16.0：37 项 JavaScript Bridge/RunView 测试通过。
-- Node 22.16.0：3 项 Web 启动器测试通过，覆盖 dotenv、配置限制、模块化静态资源及内存配置端点。
-- 使用受控的本机假进程做了启动器进程编排冒烟：UI 与 Runtime 就绪、资源服务、SIGINT 统一收尾。
-- Python 静态预检：TOML/JSON、目录/模块、生产依赖图、Bridge 可选性、Markdown 链接和测试清单通过。
+- Cargo workspace：161 项 Rust 测试通过（`cargo test --workspace --all-targets --offline`）。
+- Rust 文档测试通过；`cargo check -p server --no-default-features` 通过。
+- Windows Tauri 原生 feature 编译通过（`cargo check -p tauri-composition --features tauri --locked`）；这不是 GUI 窗口验收。
+- Node 24.19.0：37 项 JavaScript Bridge/RunView 测试、4 项启动器测试和 3 项 Web 管理测试通过；TypeScript 5.8.3 客户端声明检查通过。
+- 隔离环境（无 `.env`、无既有模型配置）：`npm run dev:web` 启动成功，浏览器自动连接并打开空模型设置页。
 
-这些检查不等于真实 Rust 模型服务的端到端验收。
+这些检查不等于真实付费模型服务、原生 Tauri 窗口交互或生产部署策略的端到端验收。
 
-## 明确未执行
+## 仍需目标环境联调
 
-当前执行环境没有 Cargo/Rustc，因此没有执行：
-
-- Rust 构建与 143 项 Rust 测试；
-- Rustfmt、Clippy；
-- 原生 Tauri 构建；
-- 真实模型端点联调；
-- 真实工具副作用、权限、持久化和性能基准。
-
-GitHub Actions 已加入 Web 启动器测试，提交后的 CI 状态应作为下一步 Rust 验证依据。
+- Rustfmt、Clippy（若发布流程要求）。
+- 真实模型端点、真实工具副作用、权限、持久化和性能基准。
+- 生产 TLS、账户认证、租户隔离、密钥系统与正式前端构建。
 
 ## 目录与完整性说明
 
-此前打包交付使用的 `MANIFEST.sha256` 是一次性快照，不适合持续演进的 Git 仓库；本次从仓库中移除。版本完整性由 Git commit、CI 与发布制品的独立校验负责。
+此前打包交付使用的 `MANIFEST.sha256` 与静态检查记录已保留在 `verification/release-v0.3.0/`，作为历史归档，不作为当前目录校验。迁移后的版本完整性由 Git commit、CI 与新的验证记录负责。
 
-`ui/index.html`、`ui/app.mjs` 与 `ui/styles.css` 构成可直接修改的标准参考 UI。`npm run dev:web` 通过环回配置端点提供临时 Bridge Token，不把它写入 URL 或本地存储。
+`apps/web/index.html`、`apps/web/app.mjs` 与 `apps/web/styles.css` 构成正式通用 UI。`npm run dev:web` 通过环回配置端点提供临时 Bridge Token，不把它写入 URL 或本地存储。
 
 ## 仍未提供的能力
 

@@ -1,6 +1,6 @@
-use agent_api::{Result, RunRequest, RunStatus};
-use agent_core::HostBuilder;
-use agent_demo::{call, display_run, text, Add, ScriptedModel};
+use api::{Result, RunRequest, RunStatus};
+use runtime::HostBuilder;
+use demo::{call, display_run, text, Add, ScriptedModel};
 use serde_json::json;
 use std::sync::Arc;
 

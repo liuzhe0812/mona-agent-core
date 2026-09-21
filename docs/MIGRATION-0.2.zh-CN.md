@@ -3,7 +3,7 @@
 这是 0.x 破坏性接口更新，不是把旧事件换个名字就全部兼容。
 
 1. API_VERSION 由 1 升至 2；使用 PluginManifest::new 的插件自动用当前值，手填版本的插件需更新并验证。
-2. RunHandle 移到 agent-api。Core 保留便利用再导出；新代码应依赖 AgentRuntime/RunSession，而不是 Engine 私有类型。
+2. RunHandle 移到 api。Core 保留便利用再导出；新代码应依赖 AgentRuntime/RunSession，而不是 Engine 私有类型。
 3. 原有 AgentExecutor.execute 保留，仅返回最终报告。Planner 可继续使用，但没有默认复合流式 Run；不要把它强行当成 AgentRuntime。
 4. 原始 ToolStarted/ToolProgress/ToolFinished、文本事件替换为工作项生命周期及带 item_id 的增量事件。更新 EventObserver 的匹配分支。
 5. EventEnvelope 加入 protocol_version；新 UI 应使用提供的 RunView 和完整 seq 恢复规则。不要只根据 event 文本追加字符串。

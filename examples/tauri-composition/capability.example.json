@@ -2,5 +2,5 @@
   "identifier":"agent-local-main",
   "description":"Agent access for the trusted local main webview only",
   "windows":["main"],
-  "permissions":["core:default","agent-bridge:default"]
+  "permissions":["core:default","bridge:default"]
 }

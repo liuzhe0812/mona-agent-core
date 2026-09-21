@@ -2,9 +2,9 @@
 
 ## 1. 开发原则
 
-插件生产依赖 `agent-api`，不要导入 Core 的私有结构。示例可参考 `plugins/agent-memory` 与 `plugins/agent-planner`；两者均没有第二套执行循环。
+Plugin 是组件接入 Runtime 的一种方式，不是所有组件的必需形态。组件应先拥有可复用的普通 API；需要运行时注册或统一生命周期时，再提供薄 Plugin 入口。Plugin 生产依赖 `api`，不要导入 Runtime 的私有结构。示例可参考 `packages/memory` 与 `packages/planner`；两者均没有第二套执行循环。
 
-当前插件是可信 Rust crate，随宿主编译，通过 `HostBuilder.plugin(Arc<dyn Plugin>)` 注册。没有 npm/Python 包装，没有动态库、热加载或下载市场。
+当前 Plugin 是可信 Rust crate，随宿主编译，通过 `HostBuilder.plugin(Arc<dyn Plugin>)` 注册。没有 npm/Python 包装，没有动态库、热加载或下载市场。
 
 ## 2. 安装协议
 

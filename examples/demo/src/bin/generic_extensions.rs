@@ -1,7 +1,7 @@
 //! Generic extension seams; no database, Mona types, Python runtime or bridge.
 //! The model below is scripted and intentionally does not interpret the sample image.
-use agent_api::*;
-use agent_core::HostBuilder;
+use api::*;
+use runtime::HostBuilder;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 

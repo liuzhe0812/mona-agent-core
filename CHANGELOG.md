@@ -18,7 +18,7 @@
 - Breaking: API_VERSION/STREAM_VERSION 2，RunHandle/RunSession/AgentRuntime 进入公共API。
 - Core新增工作项开始/更新/完成、文本/参数/工具日志增量、完整有界终态与原子快照。
 - ToolProgress增加有界命名空间详情；不加入编码、审批、JEV等业务分支。
-- 新增独立agent-application：任务注册、窗口幂等、取消/输入、UI-safe结果、回放/恢复、保留上限。
+- 新增独立application：任务注册、窗口幂等、取消/输入、UI-safe结果、回放/恢复、保留上限。
 - 新增独立HTTP/Axum+SSE桥接与Tauri2 Command/ACK Channel桥接；均只调用统一Application。
 - 新增无框架JS/TS客户端和共享RunView，HTTP与Tauri可分别导入。
 - 新增HTTP演示组合根、Tauri装配函数/capability样例、迁移与接入文档。

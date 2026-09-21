@@ -69,7 +69,7 @@ Core 的任务是：在明确权限和资源限制内，完成一次可观察、
 
 ### 4.1 从 Pi 保留的设计方向
 
-重点是 Agent 状态、消息投影、结构化模型／工具接口、事件、取消及轮次安全边界。官方 agent-core 文档明确展示了内部消息到模型消息的转换链和工具执行事件，参见 [参考来源](REFERENCES.md)。
+重点是 Agent 状态、消息投影、结构化模型／工具接口、事件、取消及轮次安全边界。官方 runtime 文档明确展示了内部消息到模型消息的转换链和工具执行事件，参见 [参考来源](REFERENCES.md)。
 
 我们的取舍不是机械移植其类和所有选项：不引入 TypeScript Runtime，不承诺插件兼容，不把 Coding Agent 应用能力一起塞进 Core。
 
@@ -238,7 +238,7 @@ Rust 可以帮助控制本地内存、并发和框架开销，但不能缩短远
 
 ### 14.2 “Rust API”不是“HTTP API”
 
-agent-api是库接口。Tauri本地UI走IPC/Channel，HTTP只在浏览器/远程部署时需要。保持Core不认识Tauri/Axum；桥接不需要知道具体Engine和模型厂商。CLI可以完全绕过Application直接嵌入Core。
+api是库接口。Tauri本地UI走IPC/Channel，HTTP只在浏览器/远程部署时需要。保持Core不认识Tauri/Axum；桥接不需要知道具体Engine和模型厂商。CLI可以完全绕过Application直接嵌入Core。
 
 ### 14.3 流式是状态协议，不是打字动画
 

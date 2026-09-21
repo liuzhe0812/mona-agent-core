@@ -1,7 +1,7 @@
-use agent_api::{Result, RunRequest};
-use agent_core::HostBuilder;
-use agent_demo::{display_run, text, ScriptedModel};
-use agent_memory::{InMemoryStore, MemoryBackend, MemoryPlugin};
+use api::{Result, RunRequest};
+use runtime::HostBuilder;
+use demo::{display_run, text, ScriptedModel};
+use memory::{InMemoryStore, MemoryBackend, MemoryPlugin};
 use std::sync::Arc;
 
 #[tokio::main]
