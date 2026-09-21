@@ -1,0 +1,41 @@
+# v0.2 验收矩阵
+
+状态区分：**已执行通过**、**已写测试未执行**、**未覆盖/需人工联调**。
+
+| 能力 | 本次状态 | 验收入口 |
+|---|---|---|
+| JS文本/工具增量、最终项覆盖、游标去重 | 已执行通过 | reducer.test.mjs |
+| SSE分包UTF-8/CRLF/多行/尺寸/截断 | 已执行通过 | sse.test.mjs |
+| HTTP客户端鉴权header、游标、失败与取消订阅 | 已执行通过（mock） | http.test.mjs |
+| Tauri客户端首包竞态、ACK、超时、订阅清理 | 已执行通过（mock） | tauri.test.mjs |
+| TS客户端公共声明与两种实现可替换 | 已执行通过 | test/types.ts |
+| Rust基础编译与旧58项回归 | 已写测试未执行 | cargo test --workspace |
+| Rust公共流式契约/终态/Tool详情/不执行半成品参数 | 已写测试未执行 | core/api streaming测试 |
+| Application幂等/输入去重/取消/容量/回放/隐私 | 已写测试未执行 | application测试 |
+| Axum实际Router路径/HTTP Body/SSE | 已写测试未执行 | bridges/http/tests |
+| Rust Channel单包ACK/归属/超时 | 已写测试未执行（无原生WebView） | bridges/tauri/tests |
+| HTTP创建的任务经Tauri通道看到同一状态 | 已写测试未执行 | server/tests/shared_application.rs |
+| Tauri2原生命令、权限生成与宿主装配 | 未编译/需原生验收 | cargo check --features tauri；Windows CI |
+| 真实浏览器↔Rust HTTP、Tauri WebView↔Rust | 需端到端联调 | 启動示例/真实Tauri宿主 |
+| 真实模型流/授权/取消/特殊错误 | 未联调 | 配置真实测试端点 |
+| 高并发、代理缓冲、XSS/CSP、密钥与租户策略 | 需业务验证 | 压力和安全测试 |
+| 重启恢复/持久化幂等 | 未实现 | 不作为本版能力 |
+
+首次完成Rust构建后保存Cargo.lock、工具链版本、测试日志；修复编译/回归问题再做原生Tauri与真实模型联调。不能把Python静态检查或JS mock测试等同于完成Rust验收。
+
+
+## v0.3 通用契约验收（已写测试，尚未执行Rust）
+
+| 范围 | 新测试/验收要求 |
+|---|---|
+| 内容 | 旧字符串序列化、内容块顺序、Base64编码规则、资源不冒充内容、富结果上限 |
+| 工具错误 | is_error与structured一起保留，后处理不能改执行身份/状态 |
+| 工具选择 | 每轮重新计算、Run上限、连续收紧、隐藏调用拒绝、最终权限不绕过、选择超时 |
+| 检查点 | 单Run序号、快照不可变、intent先于动作、局部结果、派发前/结果后/终态确认失败 |
+| 取消 | 取消后仍提交Unknown/最终状态；存储有独立短期限 |
+| 确认 | 输入回执等待提交；重复sink注册拒绝；超大快照不进入模型/存储IO |
+| 协议 | ProviderData命名空间、签名/数组保持、UI不泄露、参数白名单和模型允许列表 |
+| 组合 | 辅助调用共享预算并继承选项，Planner子运行不扩大工具上限 |
+| UI | UI协议仍为2；JS客户端37项mock测试与声明检查重新执行 |
+
+真实端点必须测试可用图片、不同模型参数/签名协议、工具图片投影；示例AQ==只测试编码形状，不是有效PNG验收。持久化sink必须另外进行真实DB故障注入（写成功但确认丢失、事务失败、重启、未知工具结果核查）。本包不提供该后端或自动恢复。

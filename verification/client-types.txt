@@ -1,0 +1,4 @@
+TypeScript 5.8.3
+UTC 2026-09-20T16:52:09.140204+00:00
+Command: tsc -p clients/javascript/tsconfig.json
+exit_code=0

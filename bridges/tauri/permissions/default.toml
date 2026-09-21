@@ -1,0 +1,7 @@
+[default]
+description = "Agent commands for explicitly trusted local webviews; includes task execution."
+permissions = [
+  "allow-start-task", "allow-cancel-task", "allow-send-input",
+  "allow-get-snapshot", "allow-get-result", "allow-forget-run",
+  "allow-subscribe-events", "allow-ack-event", "allow-unsubscribe-events"
+]

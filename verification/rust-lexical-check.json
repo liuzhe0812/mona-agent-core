@@ -1,0 +1,15 @@
+{
+  "tool": "Pygments RustLexer 2.20.0",
+  "source_files": 57,
+  "issues": [],
+  "status": "passed_lexical_and_delimiter_scan_only",
+  "not_checked": [
+    "Rust grammar",
+    "types",
+    "borrow checking",
+    "macros",
+    "linking",
+    "tests",
+    "runtime behavior"
+  ]
+}

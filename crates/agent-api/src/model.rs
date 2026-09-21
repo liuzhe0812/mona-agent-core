@@ -1,0 +1,80 @@
+use crate::{Message, Result, ToolCall, ToolSpec, ModelOptions, ProtocolTarget, ProviderData};
+use async_trait::async_trait;
+use futures_util::Stream;
+use serde::{Deserialize, Serialize};
+use std::{pin::Pin, sync::Arc};
+use tokio_util::sync::CancellationToken;
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct Usage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+impl Usage {
+    pub fn total(&self) -> u64 { self.input_tokens.saturating_add(self.output_tokens) }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ModelRequest {
+    pub messages: Vec<Message>,
+    pub tools: Vec<ToolSpec>,
+    pub max_output_tokens: u32,
+    #[serde(default)]
+    pub options: ModelOptions,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishReason { Stop, ToolCalls, Length, Filtered }
+
+#[derive(Clone, Debug)]
+pub enum ModelEvent {
+    Text(String),
+    Reasoning(String),
+    ToolDelta { index: usize, id: Option<String>, name: Option<String>, arguments: String },
+    /// Complete opaque snapshot for a message/call, not displayable reasoning.
+    ProviderData { target: ProtocolTarget, data: ProviderData },
+    /// A cumulative snapshot for this request, not a token delta.
+    Usage(Usage),
+    Finish(FinishReason),
+    /// Transport-level completion (for SSE: received [DONE]).
+    End,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ModelReply {
+    pub content: String,
+    pub tool_calls: Vec<ToolCall>,
+    pub reasoning_content: Option<String>,
+    #[serde(default)]
+    pub provider_data: Option<ProviderData>,
+    pub finish: FinishReason,
+    pub usage: Option<Usage>,
+}
+impl ModelReply {
+    pub fn into_message(self) -> Message {
+        Message::Assistant { content: self.content, tool_calls: self.tool_calls, reasoning_content: self.reasoning_content, provider_data: self.provider_data }
+    }
+}
+
+pub type ModelStream = Pin<Box<dyn Stream<Item = Result<ModelEvent>> + Send>>;
+
+/// Raw adapter. Application plugins should use RunContext.model, not this interface.
+#[async_trait]
+pub trait Model: Send + Sync {
+    async fn stream(&self, request: ModelRequest, cancel: CancellationToken) -> Result<ModelStream>;
+}
+
+/// Nonblocking observer of a model call. Final correctness comes from ModelReply.
+pub trait ModelSink: Send + Sync {
+    fn text(&self, delta: &str);
+    /// Metadata is cumulative; arguments is only the newly arrived fragment.
+    /// UI preview only: runtime execution still requires a complete validated ModelReply.
+    fn tool_delta(&self, _index: usize, _id: Option<&str>, _name: Option<&str>, _arguments: &str) {}
+}
+
+/// Budgeted, timed, bounded gateway bound to a Run. Shared by tools and transforms.
+#[async_trait]
+pub trait ModelCaller: Send + Sync {
+    async fn complete(&self, request: ModelRequest, sink: Option<Arc<dyn ModelSink>>) -> Result<ModelReply>;
+}

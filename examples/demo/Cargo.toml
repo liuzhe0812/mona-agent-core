@@ -1,0 +1,18 @@
+[package]
+name = "agent-demo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+agent-api.workspace = true
+agent-core.workspace = true
+agent-providers.workspace = true
+agent-memory.workspace = true
+agent-planner.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true

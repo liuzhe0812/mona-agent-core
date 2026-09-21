@@ -1,0 +1,26 @@
+{
+  "name": "@agent-core/client",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.mjs"
+    },
+    "./http": {
+      "types": "./src/http.d.ts",
+      "import": "./src/http.mjs"
+    },
+    "./tauri": {
+      "types": "./src/tauri.d.ts",
+      "import": "./src/tauri.mjs"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

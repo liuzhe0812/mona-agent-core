@@ -1,0 +1,63 @@
+name: Rust source acceptance
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Verify Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash scripts/verify.sh
+      - name: Verify Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/verify.ps1
+      - name: Retain logs and resolved lockfile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-${{ matrix.os }}
+          path: |
+            verification/
+            Cargo.lock
+          if-no-files-found: warn
+
+  native-tauri:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check actual Tauri commands and composition
+        shell: pwsh
+        run: |
+          cargo check -p tauri-plugin-agent-bridge --features tauri --all-targets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo check -p agent-tauri-composition --features tauri
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  client-types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/test-clients.mjs
+      - run: npx --yes --package typescript@5.8.3 tsc -p clients/javascript/tsconfig.json

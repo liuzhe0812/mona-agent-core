@@ -1,0 +1,25 @@
+{
+  "version": "0.3.0",
+  "created_utc": "2026-09-20T16:52:09.140204+00:00",
+  "status": "source_candidate_not_rust_accepted",
+  "javascript_tests": {
+    "passed": 37,
+    "failed": 0,
+    "scope": "client mock transports and reducer, not Rust backend"
+  },
+  "typescript_declarations": "passed_5.8.3",
+  "authored_rust_tests": 143,
+  "new_authored_rust_tests": 53,
+  "rust_compilation": "not_run_no_toolchain",
+  "rust_tests": "not_run",
+  "rustfmt": "not_run",
+  "clippy": "not_run",
+  "native_tauri": "not_run",
+  "real_provider": "not_run",
+  "durable_sink": "not_provided_or_tested",
+  "benchmarks": "not_run",
+  "cargo_lock": "not_generated",
+  "ui_stream_version": 2,
+  "rust_api_version": 3,
+  "checkpoint_version": 1
+}

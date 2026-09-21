@@ -1,0 +1,17 @@
+[package]
+name = "agent-tauri-composition"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = []
+tauri = ["dep:tauri", "agent-bridge-tauri/tauri"]
+
+[dependencies]
+agent-api.workspace = true
+agent-core.workspace = true
+agent-application.workspace = true
+agent-bridge-tauri.workspace = true
+tauri = { version = "2", default-features = false, optional = true }

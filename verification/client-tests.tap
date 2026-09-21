@@ -1,0 +1,232 @@
+TAP version 13
+# Subtest: HTTP wrapper uses authorization header, no credentials, no token in URL
+ok 1 - HTTP wrapper uses authorization header, no credentials, no token in URL
+  ---
+  duration_ms: 24.161213
+  type: 'test'
+  ...
+# Subtest: HTTP SSE emits first through final events into the shared reducer
+ok 2 - HTTP SSE emits first through final events into the shared reducer
+  ---
+  duration_ms: 7.045353
+  type: 'test'
+  ...
+# Subtest: reconnect cursor is transmitted in Last-Event-ID
+ok 3 - reconnect cursor is transmitted in Last-Event-ID
+  ---
+  duration_ms: 0.780389
+  type: 'test'
+  ...
+# Subtest: HTTP awaits UI processing instead of building an application queue
+ok 4 - HTTP awaits UI processing instead of building an application queue
+  ---
+  duration_ms: 12.373685
+  type: 'test'
+  ...
+# Subtest: unfinished disconnect reports last applied cursor for reconnect
+ok 5 - unfinished disconnect reports last applied cursor for reconnect
+  ---
+  duration_ms: 1.122061
+  type: 'test'
+  ...
+# Subtest: HTTP errors retain structured status and do not auto-retry starts
+ok 6 - HTTP errors retain structured status and do not auto-retry starts
+  ---
+  duration_ms: 0.486789
+  type: 'test'
+  ...
+# Subtest: detach aborts the stream, never posts task cancellation
+ok 7 - detach aborts the stream, never posts task cancellation
+  ---
+  duration_ms: 0.308071
+  type: 'test'
+  ...
+# Subtest: remote cleartext, URL credentials and weak token are rejected
+ok 8 - remote cleartext, URL credentials and weak token are rejected
+  ---
+  duration_ms: 0.352829
+  type: 'test'
+  ...
+# Subtest: unexpected content type is a protocol error
+ok 9 - unexpected content type is a protocol error
+  ---
+  duration_ms: 0.588081
+  type: 'test'
+  ...
+# Subtest: cursor validation rejects negative, fractional and unsafe values
+ok 10 - cursor validation rejects negative, fractional and unsafe values
+  ---
+  duration_ms: 0.442022
+  type: 'test'
+  ...
+# Subtest: text deltas followed by authoritative completion do not double append
+ok 11 - text deltas followed by authoritative completion do not double append
+  ---
+  duration_ms: 1.220669
+  type: 'test'
+  ...
+# Subtest: duplicate sequence from a reconnect is ignored
+ok 12 - duplicate sequence from a reconnect is ignored
+  ---
+  duration_ms: 0.149493
+  type: 'test'
+  ...
+# Subtest: a gap requires snapshot recovery rather than guessing missing text
+ok 13 - a gap requires snapshot recovery rather than guessing missing text
+  ---
+  duration_ms: 0.489193
+  type: 'test'
+  ...
+# Subtest: wrong run and protocol version are rejected
+ok 14 - wrong run and protocol version are rejected
+  ---
+  duration_ms: 0.164717
+  type: 'test'
+  ...
+# Subtest: older snapshot never regresses the current projection
+ok 15 - older snapshot never regresses the current projection
+  ---
+  duration_ms: 0.185397
+  type: 'test'
+  ...
+# Subtest: partial arguments are only a preview; completed item supplies parsed arguments
+ok 16 - partial arguments are only a preview; completed item supplies parsed arguments
+  ---
+  duration_ms: 0.779578
+  type: 'test'
+  ...
+# Subtest: tool progress and final result remain distinct
+ok 17 - tool progress and final result remain distinct
+  ---
+  duration_ms: 0.192448
+  type: 'test'
+  ...
+# Subtest: UTF-8 previews are byte bounded without broken characters
+ok 18 - UTF-8 previews are byte bounded without broken characters
+  ---
+  duration_ms: 1.062652
+  type: 'test'
+  ...
+# Subtest: visible work item retention is bounded and pruning is explicit
+ok 19 - visible work item retention is bounded and pruning is explicit
+  ---
+  duration_ms: 3.382426
+  type: 'test'
+  ...
+# Subtest: unknown event does not advance sequence
+ok 20 - unknown event does not advance sequence
+  ---
+  duration_ms: 0.343004
+  type: 'test'
+  ...
+# Subtest: fault and terminal helpers expose a reliable completion boundary
+ok 21 - fault and terminal helpers expose a reliable completion boundary
+  ---
+  duration_ms: 0.213841
+  type: 'test'
+  ...
+# Subtest: request keys are distinct bounded identifiers
+ok 22 - request keys are distinct bounded identifiers
+  ---
+  duration_ms: 1.468981
+  type: 'test'
+  ...
+# Subtest: SSE parses split Chinese UTF-8 and CRLF correctly
+ok 23 - SSE parses split Chinese UTF-8 and CRLF correctly
+  ---
+  duration_ms: 6.212716
+  type: 'test'
+  ...
+# Subtest: comments, multiline data and id carry-forward follow SSE framing
+ok 24 - comments, multiline data and id carry-forward follow SSE framing
+  ---
+  duration_ms: 0.489003
+  type: 'test'
+  ...
+# Subtest: bare CR delimiters and final CR are supported
+ok 25 - bare CR delimiters and final CR are supported
+  ---
+  duration_ms: 1.095
+  type: 'test'
+  ...
+# Subtest: truncated final frame is rejected rather than treated as complete
+ok 26 - truncated final frame is rejected rather than treated as complete
+  ---
+  duration_ms: 0.611626
+  type: 'test'
+  ...
+# Subtest: invalid UTF-8 fails closed
+ok 27 - invalid UTF-8 fails closed
+  ---
+  duration_ms: 0.322173
+  type: 'test'
+  ...
+# Subtest: oversized single data frame is rejected
+ok 28 - oversized single data frame is rejected
+  ---
+  duration_ms: 0.601892
+  type: 'test'
+  ...
+# Subtest: multiple small frames in one network chunk do not count as one giant frame
+ok 29 - multiple small frames in one network chunk do not count as one giant frame
+  ---
+  duration_ms: 2.333746
+  type: 'test'
+  ...
+# Subtest: reader is cancelled if consumer stops early
+ok 30 - reader is cancelled if consumer stops early
+  ---
+  duration_ms: 0.332948
+  type: 'test'
+  ...
+# Subtest: Tauri accepts packets arriving before subscribe response and awaits ACK
+ok 31 - Tauri accepts packets arriving before subscribe response and awaits ACK
+  ---
+  duration_ms: 2.197992
+  type: 'test'
+  ...
+# Subtest: Tauri callback finishes before ACK is sent
+ok 32 - Tauri callback finishes before ACK is sent
+  ---
+  duration_ms: 5.149594
+  type: 'test'
+  ...
+# Subtest: native detach never translates to cancel_task
+ok 33 - native detach never translates to cancel_task
+  ---
+  duration_ms: 0.693158
+  type: 'test'
+  ...
+# Subtest: native lost channel eventually rejects with cursor instead of hanging forever
+ok 34 - native lost channel eventually rejects with cursor instead of hanging forever
+  ---
+  duration_ms: 16.00218
+  type: 'test'
+  ...
+# Subtest: completed cursor with no remaining packets terminates without waiting forever
+ok 35 - completed cursor with no remaining packets terminates without waiting forever
+  ---
+  duration_ms: 0.306189
+  type: 'test'
+  ...
+# Subtest: UI callback failure is exposed and detaches the channel
+ok 36 - UI callback failure is exposed and detaches the channel
+  ---
+  duration_ms: 0.340851
+  type: 'test'
+  ...
+# Subtest: both transport clients use the same application request shape
+ok 37 - both transport clients use the same application request shape
+  ---
+  duration_ms: 0.678276
+  type: 'test'
+  ...
+1..37
+# tests 37
+# suites 0
+# pass 37
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 148.587905

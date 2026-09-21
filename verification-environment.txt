@@ -1,0 +1,9 @@
+UTC 2026-09-20T16:52:09.140204+00:00
+rustc --version: UNAVAILABLE ([Errno 2] No such file or directory: 'rustc')
+cargo --version: UNAVAILABLE ([Errno 2] No such file or directory: 'cargo')
+node --version: exit=0; v22.16.0
+tsc --version: exit=0; Version 5.8.3
+python: 3.13.5
+Rust toolchain download: attempted in this task; DNS resolution for static.rust-lang.org failed. No installation succeeded.
+Rust compilation/tests/Rustfmt/Clippy/native Tauri/real-model/DB/benchmarks: NOT RUN.
+No Cargo.lock or binary was invented. Supplied CI is configuration, not a completed GitHub workflow.
