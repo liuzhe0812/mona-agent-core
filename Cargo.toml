@@ -4,7 +4,7 @@ members = [
   "crates/agent-api", "crates/agent-core", "crates/agent-providers",
   "plugins/agent-memory", "plugins/agent-planner", "examples/demo",
   "crates/agent-application", "bridges/http", "bridges/tauri", "examples/server",
-  "examples/tauri-composition"
+  "examples/tauri-composition", "plugins/agent-model-manager"
 ]
 
 # Default build excludes both transport bridges and composition examples.

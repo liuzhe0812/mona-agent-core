@@ -1,5 +1,11 @@
 # 两种桥接的选择与接入
 
+## 0. 本地 Web 一键组合
+
+仓库根目录的 `npm run dev:web` 是 HTTP Bridge 的本地开发组合入口。它读取 `.env`，启动真实 `agent-server-example` 与标准 Web UI，临时生成 Bridge Token，并在 Runtime 就绪后自动连接。没有假模型的 `dev:web:demo` 命令。
+
+该启动器只允许环回地址，不替代生产 TLS、账户认证或多租户网关。详见 [本地开发文档](DEVELOPMENT.zh-CN.md)。
+
 ## 1. 是否要同时使用
 
 - 仅本地 Tauri：只选 Tauri bridge，不启动 HTTP 服务。

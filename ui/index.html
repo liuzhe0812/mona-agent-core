@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <base href="/ui/">
+  <title>Mona Agent</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside id="chat-sidebar" class="sidebar" aria-label="工作空间导航">
+      <div class="brand"><span class="brand-mark">M</span><div><strong>Mona</strong><small>AGENT WORKSPACE</small></div></div>
+      <button id="new-chat" class="nav primary" type="button"><span>＋</span>新对话</button>
+      <button class="nav active" type="button"><span>◫</span>当前会话</button>
+      <div class="section-label">项目</div>
+      <div class="project"><span class="project-dot"></span><div><strong>默认工作空间</strong><small>本地 UI 标签，不代表文件权限</small></div></div>
+      <div class="sidebar-spacer"></div>
+      <button id="settings-button" class="nav sidebar-settings" type="button"><span>⚙</span>设置</button>
+      <div class="sidebar-foot"><span class="avatar">M</span><div><strong>本地开发</strong><small>Core 与 UI 解耦</small></div></div>
+    </aside>
+
+    <section id="chat-workspace" class="workspace">
+      <header class="topbar">
+        <div><span class="muted">默认工作空间</span><span class="slash">/</span><strong id="thread-title">新对话</strong></div>
+        <div class="top-actions">
+          <button id="theme-toggle" class="icon-button" type="button" aria-label="切换主题">◐</button>
+          <button id="connection-button" class="connection" type="button"><span id="status-dot" class="status-dot"></span><span id="connection-label">未连接</span></button>
+        </div>
+      </header>
+
+      <main id="main" class="main">
+        <section id="welcome" class="welcome">
+          <div class="hero-mark">M</div>
+          <p class="eyebrow">A LITTLE CLARITY. A LOT OF POSSIBILITY.</p>
+          <h1>我们要一起完成什么？</h1>
+          <p>从一个想法开始，把下一步交给 Mona。</p>
+          <div class="suggestions">
+            <button type="button" data-prompt="请帮我梳理这个想法的目标、使用场景和第一版范围：\n\n">梳理一个想法<small>把灵感变成清晰方向</small></button>
+            <button type="button" data-prompt="请分析下面这段代码的职责、潜在问题和改进建议：\n\n">分析一段代码<small>理解结构，找到改进点</small></button>
+            <button type="button" data-prompt="请把这个任务拆成可执行步骤，并给出每一步的验收条件：\n\n">制定执行计划<small>将复杂任务拆成下一步</small></button>
+          </div>
+        </section>
+        <section id="timeline" class="timeline" aria-live="polite"></section>
+      </main>
+
+      <footer class="composer-wrap">
+        <div class="composer">
+          <textarea id="prompt" rows="3" placeholder="描述你希望完成的任务。Shift + Enter 换行。"></textarea>
+          <div class="composer-row">
+            <div class="composer-meta"><button id="model-button" type="button"><span id="model-label">选择模型</span><span aria-hidden="true">⌄</span></button><span>工具调用受 Core 权限控制</span></div>
+            <div class="composer-actions">
+              <button id="cancel" class="secondary" type="button" hidden>停止</button>
+              <button id="send" class="send" type="button" aria-label="发送任务">↑</button>
+            </div>
+          </div>
+        </div>
+        <p class="hint">Mona 可能会出错。涉及外部副作用时请检查工具状态与最终结果。</p>
+      </footer>
+    </section>
+
+    <section id="settings-page" class="settings-page" aria-label="设置" hidden>
+      <aside class="settings-sidebar">
+        <button id="settings-back" class="settings-back" type="button"><span aria-hidden="true">‹</span> 返回对话</button>
+        <h1>设置</h1>
+        <nav aria-label="设置分类">
+          <button class="active" type="button" aria-current="page"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4"/></svg>模型设置</button>
+        </nav>
+      </aside>
+      <main class="settings-content">
+        <header class="settings-heading">
+          <div><h2>模型供应商</h2><p>管理 OpenAI 兼容模型来源和新任务使用的默认模型</p></div>
+          <button id="settings-refresh" class="text-button" type="button">刷新</button>
+        </header>
+        <p id="model-settings-notice" class="settings-notice" role="status" aria-live="polite"></p>
+        <div class="provider-card">
+          <aside class="provider-sidebar">
+            <div class="settings-search"><svg class="line-icon search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg><input id="provider-search" type="search" placeholder="搜索供应商" aria-label="搜索供应商"></div>
+            <div id="provider-list" class="provider-list"></div>
+            <div class="add-provider-wrap"><button id="add-provider" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>添加供应商</button></div>
+          </aside>
+          <section class="provider-detail">
+            <header class="provider-header">
+              <span id="provider-logo" class="provider-logo">M</span>
+              <div class="provider-title"><div><h3 id="provider-name">选择供应商</h3><span id="provider-kind">OpenAI 兼容</span></div><p id="provider-api-base">连接 HTTP Runtime 后管理供应商与模型</p></div>
+              <div class="provider-actions"><button id="edit-provider" class="secondary" type="button">编辑</button><button id="delete-provider" class="secondary danger-button" type="button">删除</button></div>
+            </header>
+            <div class="model-toolbar">
+              <div><strong>模型列表</strong><p>开关控制是否在对话中显示，默认模型用于新任务</p></div>
+              <div class="settings-search model-search"><svg class="line-icon search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg><input id="model-search" type="search" placeholder="搜索模型" aria-label="搜索模型"></div>
+              <button id="discover-models" class="text-button" type="button">获取模型</button>
+              <button id="add-model" class="text-button" type="button">添加模型</button>
+              <button id="toggle-all-models" class="text-button" type="button">全部隐藏</button>
+            </div>
+            <div id="model-list" class="model-list"></div>
+          </section>
+        </div>
+      </main>
+    </section>
+  </div>
+
+  <dialog id="provider-dialog">
+    <form method="dialog" id="provider-form">
+      <div class="dialog-head"><div><p class="eyebrow">MODEL PROVIDER</p><h2 id="provider-dialog-title">添加供应商</h2></div><button value="cancel" class="icon-button" type="button" aria-label="关闭">×</button></div>
+      <p class="dialog-copy">仅支持 OpenAI 兼容接口。留空 API Key 会保留原凭据，勾选清除才会删除。</p>
+      <label>供应商名称<input id="provider-name-input" type="text" maxlength="80" autocomplete="off" required></label>
+      <label>API Base<input id="provider-api-base-input" type="url" maxlength="2048" placeholder="https://api.example.com/v1" autocomplete="off" required></label>
+      <label>API Key<input id="provider-key-input" type="password" maxlength="4096" placeholder="留空以保留已保存的密钥" autocomplete="new-password"></label>
+      <label class="checkbox-label"><input id="provider-clear-key" type="checkbox"> 清除已保存的 API Key</label>
+      <label>模型 ID（每行一个）<textarea id="provider-models-input" rows="6" placeholder="例如：gpt-4o-mini"></textarea></label>
+      <p id="provider-form-error" class="error" role="alert"></p>
+      <div class="dialog-actions"><button id="provider-discover" class="secondary" type="button">获取模型</button><button value="cancel" class="secondary" type="button">取消</button><button id="provider-save" value="default" class="primary" type="submit">保存</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="model-dialog">
+    <form method="dialog" id="model-form">
+      <div class="dialog-head"><div><p class="eyebrow">MODEL</p><h2>添加模型</h2></div><button value="cancel" class="icon-button" type="button" aria-label="关闭">×</button></div>
+      <p class="dialog-copy">输入供应商返回的模型 ID；保存后可在列表中控制显示和默认模型。</p>
+      <label>模型 ID<input id="model-id-input" type="text" maxlength="512" autocomplete="off" required></label>
+      <p id="model-form-error" class="error" role="alert"></p>
+      <div class="dialog-actions"><button value="cancel" class="secondary" type="button">取消</button><button id="model-save" value="default" class="primary" type="submit">添加</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="model-picker-dialog">
+    <form method="dialog" id="model-picker-form">
+      <div class="dialog-head"><div><p class="eyebrow">COMPOSER MODEL</p><h2>选择模型</h2></div><button value="cancel" class="icon-button" type="button" aria-label="关闭">×</button></div>
+      <p class="dialog-copy">选择后会设置默认模型，并用于之后的新任务。</p>
+      <div id="model-picker-list" class="model-picker-list"></div>
+      <p id="model-picker-error" class="error" role="alert"></p>
+      <div class="dialog-actions"><button id="open-model-settings" class="secondary" value="cancel" type="submit">管理模型</button><button value="cancel" class="secondary" type="submit">关闭</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="connection-dialog">
+    <form method="dialog" id="connection-form">
+      <div class="dialog-head"><div><p class="eyebrow">CONNECTION</p><h2>连接 Agent Runtime</h2></div><button value="cancel" class="icon-button" aria-label="关闭">×</button></div>
+      <p class="dialog-copy">浏览器通过 HTTP/SSE Bridge 连接；本地 Tauri 可以注入 Command/Channel。已保存的模型密钥不会返回浏览器。</p>
+      <label>连接方式<select id="transport"><option value="http">HTTP Bridge</option><option value="tauri">Tauri Bridge</option></select></label>
+      <div id="http-fields">
+        <label>Agent Server 地址<input id="endpoint" type="url" value="http://127.0.0.1:8787" autocomplete="off"></label>
+        <label>Bridge Token<input id="token" type="password" autocomplete="off" placeholder="32–512 个可见 ASCII 字符"></label>
+      </div>
+      <p id="connection-error" class="error" role="alert"></p>
+      <div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="connect" value="default" class="primary">连接</button></div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./app.mjs"></script>
+</body>
+</html>

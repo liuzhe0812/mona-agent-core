@@ -1,37 +1,42 @@
-# 交付报告 · v0.3.0
+# 交付报告 · v0.3.1
 
 ## 本次实际更新
 
-在v0.2源码基础上补四类通用能力：多模态内容/工具输出、Run与轮次工具视图、可等待检查点、模型参数与私有协议保真。Memory/Planner/示例和组合根同步迁移，API协议升到3，UI流协议保持2，两个bridge仍独立可选。
+在 v0.3 通用 Core 契约上增加标准 Web UI 的本地开发组合入口：根命令 `npm run dev:web` 同时启动真实 Rust Runtime、HTTP/SSE Bridge 与 Web UI，并自动完成本机连接。
 
-这是**待Rust编译验收的源码候选版**，不是已验收发行版，不是Mona业务迁移完成包，也不是完整桌面安装包。
+本次没有增加第二套 Agent Runtime，也没有提供假模型的 `dev:web:demo`。模型配置缺失时启动器直接失败。
 
-## 实际执行的检查
+## 本次实际执行的检查
 
-- Node 22.16.0：本轮重新执行37项JS测试，通过；日志 `verification/client-tests.tap`。它们使用mock HTTP/Tauri，不代表Rust服务或原生WebView已联调。
-- TypeScript 5.8.3：本轮重新执行客户端声明/类型检查，通过；日志 `verification/client-types.txt`。
-- Python：TOML/JSON、目录/模块、生产依赖图、bridge可选性、文档链接和测试清单检查；结果见 `STATIC-CHECK.json`。
-- Rust源码额外做词法和括号配对扫描。该扫描不是Rust语法/类型/借用检查，不可以替代cargo/rustc。
-- 打包时核对SHA256与ZIP可读取性。MANIFEST记录交付快照，后续格式化/修改会改变哈希。
+- Node 22.16.0：37 项 JavaScript Bridge/RunView 测试通过。
+- Node 22.16.0：3 项 Web 启动器测试通过，覆盖 dotenv、配置限制、模块化静态资源及内存配置端点。
+- 使用受控的本机假进程做了启动器进程编排冒烟：UI 与 Runtime 就绪、资源服务、SIGINT 统一收尾。
+- Python 静态预检：TOML/JSON、目录/模块、生产依赖图、Bridge 可选性、Markdown 链接和测试清单通过。
+
+这些检查不等于真实 Rust 模型服务的端到端验收。
 
 ## 明确未执行
 
-当前环境依然没有cargo/rustc；本轮下载尝试失败，环境记录见根目录verification-environment.txt。因此**Rust构建、143项Rust测试、Rustfmt、Clippy、原生Tauri、真实模型、真实持久化后端和性能基准都没有执行**。
+当前执行环境没有 Cargo/Rustc，因此没有执行：
 
-新增53项Rust测试，总143项，覆盖通用契约和失败路径。它们是测试源码，不是通过记录。没有生成Cargo.lock；需在可联网Rust环境解析依赖、保留锁文件并固定发布工具链。
+- Rust 构建与 143 项 Rust 测试；
+- Rustfmt、Clippy；
+- 原生 Tauri 构建；
+- 真实模型端点联调；
+- 真实工具副作用、权限、持久化和性能基准。
 
-## 没有做的事
+GitHub Actions 已加入 Web 启动器测试，提交后的 CI 状态应作为下一步 Rust 验证依据。
 
-没有加入Session/数据库产品、自动恢复、持久化UI事件、exactly-once、Mona/Python适配、业务工具、JEV、完整模型Provider集合或可见隐藏思维。
+## 目录与完整性说明
 
-Resource是引用描述；默认Chat适配器遇到未解析资源会显式拒绝。图片支持只覆盖协议与转换，AQ==测试样本不是有效PNG的视觉验收。默认HTTP/Tauri仍是文本入口，附件授权与富请求由应用组装。
+此前打包交付使用的 `MANIFEST.sha256` 是一次性快照，不适合持续演进的 Git 仓库；本次从仓库中移除。版本完整性由 Git commit、CI 与发布制品的独立校验负责。
 
-## 后续验收入口
+`ui/index.html`、`ui/app.mjs` 与 `ui/styles.css` 构成可直接修改的标准参考 UI。`npm run dev:web` 通过环回配置端点提供临时 Bridge Token，不把它写入 URL 或本地存储。
 
-1. 运行scripts/verify.sh或verify.ps1，包含新增generic_extensions离线示例；修正实际编译/测试发现的问题。
-2. 单独开启Tauri原生feature，在目标Windows/WebView中验证；HTTP仍要检查真实浏览器、代理缓冲、鉴权和断线恢复。
-3. 用真正支持图片/私有回传字段的模型端点验证，不能只用脚本模型。
-4. 安装需要的CheckpointSink并做事务/超时/确认丢失/取消测试，明确恢复策略；Core不自动重放。
-5. Mona的Provider、Python工具、会话、工作流、事件和脱敏适配在Mona側完成。
+## 仍未提供的能力
 
-**“源码已补齐”不等于“已经编译并通过生产验收”；本报告不替代实际验收。**
+没有加入 Session 数据库、崩溃自动续跑、exactly-once、Mona/Python 迁移适配、业务工具、JEV、完整 Provider 集合或生产账户系统。
+
+生产部署不能直接使用本地启动器替代 TLS、账户认证、租户隔离、密钥系统与正式前端构建。
+
+**源码更新不等于生产验收；请以目标环境的 Cargo/CI、真实模型和真实工具测试为准。**

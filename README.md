@@ -82,6 +82,8 @@ Rust插件API升级到3；UI流式协议保持2。默认仍可只用字符串和
 
 ## 5. 验证入口
 
+可选的[模型管理与 Web 设置](docs/MODEL-MANAGEMENT.zh-CN.md)由独立插件和宿主接口提供；未安装时仍可直接注入固定模型，不改变通用任务协议。
+
 需要 Rust stable + cargo/rustfmt/clippy。第一次解析依赖需要网络；首次成功生成的 Cargo.lock 应保留并在产品发布时固定工具链。
 
 ```sh

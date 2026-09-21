@@ -1,6 +1,6 @@
 # Rust测试源码清单 · v0.3.0
 
-共 143 项已编写测试；新增53项。**当前环境未运行Rust测试**，不能把此清单当通过报告。使用scripts/verify.sh或verify.ps1执行。
+以下原 v0.3 清单记录当时的 143 项测试及历史执行状态；本次可选模型管理新增测试与验证结果见文末。使用 scripts/verify.sh 或 verify.ps1 执行完整验收。
 
 | 文件 | 测试 | 执行状态 |
 |---|---|---|
@@ -147,3 +147,28 @@
 | `crates/agent-providers/src/sse.rs` | `large_unterminated_frame_is_rejected` | 未执行 |
 | `crates/agent-providers/src/sse.rs` | `invalid_utf8_is_rejected` | 未执行 |
 | `examples/server/tests/shared_application.rs` | `http_created_run_is_visible_through_tauri_without_another_runtime` | 未执行 |
+
+## 可选模型管理新增验证
+
+2026-09-21：下列 18 项通过实际 Cargo 测试；模型请求使用本地 loopback 模拟端点，不代表真实供应商兼容性验收。原 shared_application 回归也已通过。
+
+| 文件 | 测试 | 执行状态 |
+|---|---|---|
+| `plugins/agent-model-manager/src/lib.rs` | `persistence_failures_do_not_publish_and_revisions_prevent_lost_updates` | 已通过 |
+| `plugins/agent-model-manager/src/lib.rs` | `credentials_are_write_only_and_blank_updates_preserve_them` | 已通过 |
+| `plugins/agent-model-manager/src/lib.rs` | `defaults_stay_enabled_and_cannot_be_silently_deleted` | 已通过 |
+| `plugins/agent-model-manager/src/lib.rs` | `endpoints_and_model_catalogs_are_validated_before_saving` | 已通过 |
+| `plugins/agent-model-manager/src/lib.rs` | `bound_models_outlive_configuration_changes_and_release_routes` | 已通过 |
+| `plugins/agent-model-manager/src/lib.rs` | `plugin_exposes_only_model_and_requires_the_host_runtime_decorator` | 已通过 |
+| `plugins/agent-model-manager/src/storage.rs` | `encrypted_roundtrip` | 已通过 |
+| `plugins/agent-model-manager/src/storage.rs` | `file_does_not_contain_plaintext` | 已通过 |
+| `plugins/agent-model-manager/src/storage.rs` | `wrong_key_and_tampering_fail_as_configuration_errors` | 已通过 |
+| `plugins/agent-model-manager/src/storage.rs` | `missing_file_returns_none` | 已通过 |
+| `plugins/agent-model-manager/src/storage.rs` | `save_overwrites_previous_settings` | 已通过 |
+| `plugins/agent-model-manager/src/storage.rs` | `oversized_settings_are_rejected` | 已通过 |
+| `plugins/agent-model-manager/src/storage.rs` | `short_key_material_is_rejected` | 已通过 |
+| `examples/server/tests/model_settings.rs` | `management_routes_require_bearer_authentication` | 已通过 |
+| `examples/server/tests/model_settings.rs` | `management_rejects_unknown_fields_and_does_not_return_api_keys` | 已通过 |
+| `examples/server/tests/model_settings.rs` | `management_uses_revision_conflicts_and_controls_default_visibility_and_delete` | 已通过 |
+| `examples/server/tests/model_settings.rs` | `new_runs_use_the_current_default_model` | 已通过 |
+| `examples/server/tests/model_settings.rs` | `changing_default_during_a_tool_run_does_not_change_its_next_round` | 已通过 |

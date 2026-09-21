@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+default = ["model-management"]
+model-management = ["dep:agent-model-manager", "dep:serde", "dep:subtle", "dep:tower-http"]
+
 [dependencies]
 agent-api.workspace = true
 agent-core.workspace = true
@@ -16,6 +20,10 @@ axum = "0.8"
 tokio.workspace = true
 futures-util.workspace = true
 serde_json.workspace = true
+agent-model-manager = { path = "../../plugins/agent-model-manager", optional = true }
+serde = { workspace = true, optional = true }
+subtle = { version = "2.6", optional = true }
+tower-http = { version = "0.6", features = ["cors"], optional = true }
 
 [dev-dependencies]
 agent-bridge-tauri.workspace = true
