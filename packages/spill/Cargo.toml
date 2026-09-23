@@ -1,0 +1,19 @@
+[package]
+name = "spill"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+api.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["fs", "process"] }
+
+tempfile = "3"
+
+[dev-dependencies]
+runtime.workspace = true
+futures-util.workspace = true

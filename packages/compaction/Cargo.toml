@@ -1,0 +1,17 @@
+[package]
+name = "compaction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+api.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+sha2 = "0.10"
+tokio.workspace = true
+
+[dev-dependencies]
+runtime.workspace = true
+futures-util.workspace = true

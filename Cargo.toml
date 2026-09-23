@@ -2,15 +2,15 @@
 resolver = "2"
 members = [
   "packages/api", "packages/runtime", "packages/providers",
-  "packages/memory", "packages/planner", "examples/demo",
+  "packages/memory", "packages/planner", "packages/compaction", "packages/spill", "packages/tools", "examples/demo",
   "packages/application", "packages/http-bridge", "packages/tauri-bridge", "apps/server",
-  "examples/tauri-composition", "packages/models"
+  "examples/tauri-composition", "packages/models", "packages/skills"
 ]
 
 # Default build excludes both transport bridges and composition examples.
 default-members = [
   "packages/api", "packages/runtime", "packages/providers", "packages/application",
-  "packages/memory", "packages/planner", "examples/demo"
+  "packages/memory", "packages/planner", "packages/compaction", "packages/spill", "packages/tools", "examples/demo"
 ]
 
 [workspace.package]
@@ -27,6 +27,10 @@ http-bridge = { path = "packages/http-bridge" }
 tauri-bridge = { package = "tauri-plugin-bridge", path = "packages/tauri-bridge" }
 memory = { path = "packages/memory" }
 planner = { path = "packages/planner" }
+compaction = { path = "packages/compaction" }
+spill = { path = "packages/spill" }
+tools = { path = "packages/tools" }
+base64 = "0.22"
 async-trait = "0.1.86"
 serde = { version = "1.0.217", features = ["derive", "rc"] }
 serde_json = "1.0.138"

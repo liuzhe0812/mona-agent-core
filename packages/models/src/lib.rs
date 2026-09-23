@@ -27,6 +27,9 @@ fn invalid(message: &str) -> AgentError {
 pub struct ModelEntry {
     pub id: String,
     pub enabled: bool,
+    /// Trusted per-provider/model capacity. None means unknown, never an inferred global default.
+    #[serde(default)]
+    pub context_window_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -111,6 +114,16 @@ struct Router {
 
 #[async_trait]
 impl Model for Router {
+    fn context_window_tokens(&self, options: &ModelOptions) -> Option<u64> {
+        let bound = options
+            .model
+            .as_ref()
+            .and_then(|key| lock(&self.bindings).get(key).cloned())?;
+        let mut effective = options.clone();
+        effective.model = Some(bound.model.clone());
+        bound.adapter.context_window_tokens(&effective)
+    }
+
     async fn stream(
         &self,
         mut request: ModelRequest,
@@ -240,6 +253,9 @@ impl ModelManager {
                 return Err(invalid("a provider requires 1..256 models"));
             }
             for m in &p.models {
+                if m.context_window_tokens.is_some_and(|window| window == 0 || window > 1_000_000_000) {
+                    return Err(invalid("model context window must be 1..1000000000 tokens or null"));
+                }
                 if m.id.trim().is_empty()
                     || m.id.len() > 512
                     || m.id.chars().any(char::is_control)
@@ -271,6 +287,8 @@ impl ModelManager {
         config.api_key = provider.api_key.clone();
         config.allow_http_loopback = self.inner.allow_http_loopback;
         config.extra_body = provider.extra_body.clone();
+        config.context_window_tokens = provider.models.iter().find(|entry| entry.id == model)
+            .and_then(|entry| entry.context_window_tokens);
         // Signed/private replay data stays confined to this provider.
         config.protocol_namespace = format!("managed.{}", provider.id);
         Ok(Arc::new(ChatModel::new(config)?))
@@ -341,19 +359,26 @@ impl ModelManager {
 
     pub fn delete(&self, revision: u64, provider_id: &str) -> Result<SettingsView> {
         self.update(revision, |doc| {
+            if !doc.providers.iter().any(|p| p.id == provider_id) {
+                return Err(invalid("provider not found"));
+            }
+            doc.providers.retain(|p| p.id != provider_id);
             if doc
                 .default
                 .as_ref()
                 .is_some_and(|s| s.provider_id == provider_id)
             {
-                return Err(invalid(
-                    "default_conflict: select another provider as default before deleting",
-                ));
+                doc.default = doc.providers.iter().find_map(|provider| {
+                    provider
+                        .models
+                        .iter()
+                        .find(|model| model.enabled)
+                        .map(|model| Selection {
+                            provider_id: provider.id.clone(),
+                            model_id: model.id.clone(),
+                        })
+                });
             }
-            if !doc.providers.iter().any(|p| p.id == provider_id) {
-                return Err(invalid("provider not found"));
-            }
-            doc.providers.retain(|p| p.id != provider_id);
             Ok(())
         })
     }
@@ -639,7 +664,7 @@ impl AgentRuntime for ManagedRuntime {
 #[async_trait]
 impl AgentExecutor for ManagedRuntime {
     async fn execute(&self, request: RunRequest) -> Result<Arc<RunReport>> {
-        self.start(request)?.wait().await
+        self.start(request)?.wait_owned().await
     }
 }
 
@@ -677,13 +702,43 @@ mod tests {
                 ModelEntry {
                     id: "first".into(),
                     enabled: true,
+                    context_window_tokens: None,
                 },
                 ModelEntry {
                     id: "second".into(),
                     enabled: true,
+                    context_window_tokens: None,
                 },
             ],
         }
+    }
+
+    #[test]
+    fn model_windows_are_persisted_route_bound_and_frozen_for_active_runs() {
+        let store = Arc::new(Store::default());
+        let manager = ModelManager::open(store.clone(), false).unwrap();
+        let legacy: ModelEntry = serde_json::from_str(r#"{"id":"legacy","enabled":true}"#).unwrap();
+        assert_eq!(legacy.context_window_tokens, None);
+        let mut first = input(0, "one"); first.models[0].context_window_tokens = Some(8192);
+        first.models[1].context_window_tokens = Some(32768);
+        manager.upsert(first).unwrap();
+        let old = manager.bind().unwrap();
+        let options = ModelOptions { model: Some(old.id.clone()), ..Default::default() };
+        assert_eq!(manager.inner.router.context_window_tokens(&options), Some(8192));
+        let mut edit = input(1, "one"); edit.models[0].context_window_tokens = Some(16384);
+        manager.upsert(edit).unwrap();
+        let new = manager.bind().unwrap();
+        assert_eq!(manager.inner.router.context_window_tokens(&options), Some(8192));
+        assert_eq!(manager.inner.router.context_window_tokens(&ModelOptions { model: Some(new.id.clone()), ..Default::default() }), Some(16384));
+        assert_eq!(ModelManager::open(store.clone(), false).unwrap().view().providers[0].models[0].context_window_tokens, Some(16384));
+        for window in [0, 1_000_000_001] {
+            let mut edit = input(2, "one"); edit.models[0].context_window_tokens = Some(window);
+            assert!(manager.upsert(edit).is_err()); assert_eq!(manager.view().revision, 2);
+        }
+        store.fail.store(true, Ordering::Relaxed);
+        let mut edit = input(2, "one"); edit.models[0].context_window_tokens = Some(9999);
+        assert!(manager.upsert(edit).is_err());
+        assert_eq!(manager.view().providers[0].models[0].context_window_tokens, Some(16384));
     }
 
     #[test]
@@ -736,13 +791,12 @@ mod tests {
     }
 
     #[test]
-    fn defaults_stay_enabled_and_cannot_be_silently_deleted() {
+    fn defaults_stay_enabled_and_deleting_the_default_clears_it_when_no_fallback_exists() {
         let manager = ModelManager::open(Arc::new(Store::default()), false).unwrap();
         manager.upsert(input(0, "one")).unwrap();
         let view = manager.set_visibility(1, "one", None, false).unwrap();
         assert!(view.providers[0].models[0].enabled);
         assert!(!view.providers[0].models[1].enabled);
-        assert!(manager.delete(2, "one").is_err());
         let view = manager
             .set_default(
                 2,
@@ -757,6 +811,8 @@ mod tests {
         edit.models.retain(|m| m.id != "second");
         assert!(manager.upsert(edit).is_err());
         assert_eq!(manager.view().revision, 3);
+        let view = manager.delete(3, "one").unwrap();
+        assert!(view.providers.is_empty() && view.default.is_none());
     }
 
     #[test]

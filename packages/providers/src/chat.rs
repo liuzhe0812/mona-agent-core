@@ -19,6 +19,8 @@ pub struct ChatConfig {
     pub request_timeout: Duration,
     pub max_sse_event_bytes: usize,
     pub max_wire_bytes: usize,
+    /// Optional effective context capacity for this adapter/model route.
+    pub context_window_tokens: Option<u64>,
     pub include_usage: bool,
     pub output_token_field: OutputTokenField,
     /// Provider options, e.g. thinking mode. Core-controlled fields cannot be overridden.
@@ -39,6 +41,7 @@ impl ChatConfig {
         Self { endpoint: endpoint.into(), model: model.into(), api_key: None,
             allow_http_loopback: false, request_timeout: Duration::from_secs(120),
             max_sse_event_bytes: 256 * 1024, max_wire_bytes: 8 * 1024 * 1024,
+            context_window_tokens: None,
             include_usage: true, output_token_field: OutputTokenField::MaxTokens, extra_body: Map::new(),
             allowed_models: BTreeSet::new(), allow_image_urls: false,
             protocol_namespace: "chat_completions".into(),
@@ -59,7 +62,8 @@ impl ChatModel {
             return Err(AgentError::new(ErrorCode::Configuration, "endpoint URL must not contain userinfo, query, or fragment"));
         }
         if config.model.is_empty() || config.model.len() > 512 || config.request_timeout.is_zero()
-            || config.max_sse_event_bytes == 0 || config.max_wire_bytes == 0 {
+            || config.max_sse_event_bytes == 0 || config.max_wire_bytes == 0
+            || config.context_window_tokens == Some(0) {
             return Err(AgentError::new(ErrorCode::Configuration, "invalid model adapter limits or model id"));
         }
         let reserved = RESERVED_REQUEST_FIELDS;
@@ -73,6 +77,7 @@ impl ChatModel {
             return Err(AgentError::new(ErrorCode::Configuration, "replay/option whitelist contains a reserved protocol field"));
         }
         let client = Client::builder().redirect(reqwest::redirect::Policy::none())
+            .user_agent(concat!("mona-agent-core/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(10)).timeout(config.request_timeout).build()
             .map_err(|_| AgentError::new(ErrorCode::Configuration, "HTTP client initialization failed"))?;
         Ok(Self { client, endpoint, config })
@@ -211,8 +216,141 @@ impl ChatModel {
 
 }
 
+fn retry_after_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    if let Some(value) = headers
+        .get("retry-after-ms")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        return Some(value);
+    }
+    headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .and_then(|seconds| seconds.checked_mul(1000))
+}
+
+async fn classify_http_error(
+    mut response: reqwest::Response,
+    cancel: CancellationToken,
+) -> AgentError {
+    const MAX_ERROR_BODY: usize = 64 * 1024;
+    let status = response.status().as_u16();
+    let retry_after = retry_after_ms(response.headers());
+    let mut bytes = Vec::new();
+    while bytes.len() < MAX_ERROR_BODY {
+        let chunk = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return AgentError::new(ErrorCode::Cancelled, "model request cancelled"),
+            chunk = response.chunk() => chunk,
+        };
+        let Ok(Some(chunk)) = chunk else { break };
+        let remaining = MAX_ERROR_BODY - bytes.len();
+        bytes.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+    }
+    let provider_class = serde_json::from_slice::<Value>(&bytes).ok()
+        .and_then(|body| body.get("error").and_then(|error| {
+            // A conflict is retryable only when the provider explicitly says so.
+            let allow_message = status != 409;
+            classify_provider_error_class(error, allow_message)
+        }))
+        .filter(|(code, _)| status != 409 || matches!(code, ErrorCode::ModelRateLimit | ErrorCode::ModelServer));
+    let (code, message) = if status == 401 || status == 403 {
+        (ErrorCode::ModelAuthentication, "model authentication was rejected")
+    } else if status == 402 {
+        (ErrorCode::ModelQuota, "model quota or billing limit reached")
+    } else if let Some(class) = provider_class {
+        class
+    } else if status == 409 {
+        (ErrorCode::ModelRequest, "model request was rejected")
+    } else if status == 408 || status == 429 {
+        (ErrorCode::ModelRateLimit, "model request was rate limited")
+    } else if status >= 500 {
+        (ErrorCode::ModelServer, "model provider is temporarily unavailable")
+    } else {
+        (ErrorCode::ModelRequest, "model request was rejected")
+    };
+    AgentError::new(code, message).with_http(status, retry_after)
+}
+
+type ProviderErrorClass = (ErrorCode, &'static str);
+
+fn classify_error_identifier(identifier: &str) -> Option<ProviderErrorClass> {
+    let identifier = identifier.trim().to_ascii_lowercase();
+    Some(match identifier.as_str() {
+        "context_length_exceeded" | "context_window_exceeded" | "maximum_context_length_exceeded"
+        | "max_context_length_exceeded" => (ErrorCode::ModelContextWindow, "model context window exceeded"),
+        "authentication_error" | "authentication_failed" | "unauthorized" | "unauthorized_error"
+        | "invalid_api_key" | "invalid_api_key_error" | "permission_denied" | "permission_denied_error"
+            => (ErrorCode::ModelAuthentication, "model authentication was rejected"),
+        "insufficient_quota" | "quota_exceeded" | "quota_exceeded_error" | "billing_error"
+        | "billing_hard_limit_reached" | "billing_limit_reached" | "out_of_budget"
+            => (ErrorCode::ModelQuota, "model quota or billing limit reached"),
+        "rate_limit" | "rate_limit_exceeded" | "rate_limit_error" | "too_many_requests"
+            => (ErrorCode::ModelRateLimit, "model request was rate limited"),
+        "server_error" | "service_unavailable" | "service_unavailable_error" | "overloaded"
+        | "overloaded_error" | "temporary_failure" | "temporarily_unavailable"
+        | "internal_server_error" | "internal_error"
+            => (ErrorCode::ModelServer, "model provider is temporarily unavailable"),
+        _ => return None,
+    })
+}
+
+fn classify_error_message(message: &str) -> Option<ProviderErrorClass> {
+    let message = message.trim().trim_end_matches(|character| matches!(character, '.' | '!')).to_ascii_lowercase();
+    if let Some(class) = classify_error_identifier(&message) {
+        return Some(class);
+    }
+    match message.as_str() {
+        "context length exceeded" | "context window exceeded" | "maximum context length exceeded"
+            => Some((ErrorCode::ModelContextWindow, "model context window exceeded")),
+        "authentication failed" | "unauthorized" | "invalid api key" | "permission denied"
+            => Some((ErrorCode::ModelAuthentication, "model authentication was rejected")),
+        "insufficient quota" | "quota exceeded" | "out of budget" | "billing limit reached"
+            => Some((ErrorCode::ModelQuota, "model quota or billing limit reached")),
+        "rate limit exceeded" | "too many requests" | "temporarily rate limited"
+            => Some((ErrorCode::ModelRateLimit, "model request was rate limited")),
+        "server error" | "service unavailable" | "overloaded" | "temporarily unavailable"
+            => Some((ErrorCode::ModelServer, "model provider is temporarily unavailable")),
+        _ => None,
+    }
+}
+
+fn classify_provider_error_class(error: &Value, allow_message: bool) -> Option<ProviderErrorClass> {
+    let object = error.as_object();
+    for field in ["code", "type"] {
+        if let Some(identifier) = object.and_then(|object| object.get(field)).and_then(Value::as_str) {
+            if let Some(class) = classify_error_identifier(identifier) {
+                return Some(class);
+            }
+        }
+    }
+    if allow_message {
+        object.and_then(|object| object.get("message")).and_then(Value::as_str)
+            .and_then(classify_error_message)
+            .or_else(|| error.as_str().and_then(classify_error_message))
+    } else {
+        None
+    }
+}
+
+fn classify_provider_error(error: &Value) -> AgentError {
+    let (code, message) = classify_provider_error_class(error, true)
+        .unwrap_or((ErrorCode::ModelRequest, "provider emitted an error object"));
+    AgentError::new(code, message)
+}
+
 #[async_trait]
 impl Model for ChatModel {
+    fn context_window_tokens(&self, options: &ModelOptions) -> Option<u64> {
+        match options.model.as_deref() {
+            None => self.config.context_window_tokens,
+            Some(model) if model == self.config.model => self.config.context_window_tokens,
+            Some(_) => None,
+        }
+    }
+
     async fn stream(&self, request: ModelRequest, cancel: CancellationToken) -> Result<ModelStream> {
         let body = self.body(&request)?;
         let mut request = self.client.post(self.endpoint.clone()).json(&body).header("Accept", "text/event-stream");
@@ -223,56 +361,82 @@ impl Model for ChatModel {
             response = request.send() => response.map_err(|_| AgentError::new(ErrorCode::ModelTransport, "model HTTP request failed (credentials/body omitted)"))?,
         };
         if !response.status().is_success() {
-            // Never retry implicitly and never echo server bodies containing prompts or credentials.
-            return Err(AgentError::new(ErrorCode::ModelTransport, format!("model HTTP status {}", response.status().as_u16())));
+            return Err(classify_http_error(response, cancel.clone()).await);
         }
         let content_type = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|h| h.to_str().ok()).unwrap_or("");
         if !content_type.to_ascii_lowercase().starts_with("text/event-stream") {
             return Err(AgentError::new(ErrorCode::ModelProtocol, "expected text/event-stream response"));
         }
         let state = WireState { body: Box::pin(response.bytes_stream()), decoder: SseDecoder::new(self.config.max_sse_event_bytes),
-            pending: VecDeque::new(), done: false, cancel, received: 0, max_wire: self.config.max_wire_bytes,
+            pending: VecDeque::new(), failure: None, output_started: false,
+            done: false, cancel, received: 0, max_wire: self.config.max_wire_bytes,
             replay: ReplayCapture { namespace: self.config.protocol_namespace.clone(),
                 message_fields: self.config.message_replay_fields.clone(), tool_fields: self.config.tool_replay_fields.clone(),
                 message: Map::new(), tools: std::collections::BTreeMap::new() } };
-        let stream = futures_util::stream::try_unfold(state, |mut state| async move {
-            loop {
-                if let Some(event) = state.pending.pop_front() { return Ok(Some((event, state))); }
-                if state.done { return Ok(None); }
-                let item = tokio::select! {
-                    biased;
-                    _ = state.cancel.cancelled() => return Err(AgentError::new(ErrorCode::Cancelled, "model stream cancelled")),
-                    item = state.body.next() => item,
-                };
-                let chunk = match item {
-                    Some(Ok(bytes)) => bytes,
-                    Some(Err(_)) => return Err(AgentError::new(ErrorCode::ModelTransport, "model stream transport error")),
-                    None => return Err(AgentError::new(ErrorCode::ModelTransport, "model connection closed without [DONE]")),
-                };
-                state.received = state.received.saturating_add(chunk.len());
-                if state.received > state.max_wire { return Err(AgentError::new(ErrorCode::Limit, "SSE response exceeds wire byte limit")); }
-                for data in state.decoder.push(&chunk)? {
-                    if state.done { return Err(AgentError::new(ErrorCode::ModelProtocol, "SSE data after [DONE]")); }
-                    if data.trim() == "[DONE]" { state.done = true; state.pending.push_back(ModelEvent::End); }
-                    else {
-                        let mut events = decode_chunk(&data)?;
-                        let replay = state.replay.capture(&data)?;
-                        // Replay snapshots precede Finish; never accept content after a finish event.
-                        let position = events.iter().position(|e| matches!(e, ModelEvent::Finish(_))).unwrap_or(events.len());
-                        events.splice(position..position, replay);
-                        state.pending.extend(events);
-                    }
-                }
-            }
-        });
-        Ok(Box::pin(stream))
+        Ok(state.into_stream())
     }
 }
 
 type ByteStream = Pin<Box<dyn Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send>>;
 struct WireState {
     body: ByteStream, decoder: SseDecoder, pending: VecDeque<ModelEvent>, done: bool,
+    failure: Option<AgentError>, output_started: bool,
     cancel: CancellationToken, received: usize, max_wire: usize, replay: ReplayCapture,
+}
+impl WireState {
+    fn mark_error(&self, mut error: AgentError) -> AgentError {
+        error.model_output_started |= self.output_started;
+        error
+    }
+    fn ingest(&mut self, chunk: &[u8]) -> Result<()> {
+        for data in self.decoder.push(chunk)? {
+            if self.done { return Err(AgentError::new(ErrorCode::ModelProtocol, "SSE data after [DONE]")); }
+            if data.trim() == "[DONE]" {
+                self.done = true;
+                self.pending.push_back(ModelEvent::End);
+            } else {
+                let mut events = decode_chunk(&data)?;
+                let replay = self.replay.capture(&data)?;
+                let position = events.iter().position(|e| matches!(e, ModelEvent::Finish(_))).unwrap_or(events.len());
+                events.splice(position..position, replay);
+                self.output_started |= events.iter().any(|event| match event {
+                    ModelEvent::Text(text) | ModelEvent::Reasoning(text) => !text.is_empty(),
+                    ModelEvent::ToolDelta { .. } | ModelEvent::ProviderData { .. } => true,
+                    _ => false,
+                });
+                self.pending.extend(events);
+            }
+        }
+        Ok(())
+    }
+    fn into_stream(self) -> ModelStream {
+        Box::pin(futures_util::stream::try_unfold(self, |mut state| async move {
+            loop {
+                // A network chunk can contain both content/usage and a later error.
+                // Deliver earlier facts first, then fail once without reading more bytes.
+                if let Some(event) = state.pending.pop_front() { return Ok(Some((event, state))); }
+                if let Some(error) = state.failure.take() { return Err(error); }
+                if state.done { return Ok(None); }
+                let item = tokio::select! {
+                    biased;
+                    _ = state.cancel.cancelled() => return Err(state.mark_error(AgentError::new(ErrorCode::Cancelled, "model stream cancelled"))),
+                    item = state.body.next() => item,
+                };
+                let chunk = match item {
+                    Some(Ok(bytes)) => bytes,
+                    Some(Err(_)) => return Err(state.mark_error(AgentError::new(ErrorCode::ModelTransport, "model stream transport error"))),
+                    None => return Err(state.mark_error(AgentError::new(ErrorCode::ModelTransport, "model connection closed without [DONE]"))),
+                };
+                state.received = state.received.saturating_add(chunk.len());
+                if state.received > state.max_wire {
+                    return Err(state.mark_error(AgentError::new(ErrorCode::Limit, "SSE response exceeds wire byte limit")));
+                }
+                if let Err(error) = state.ingest(&chunk) {
+                    state.failure = Some(state.mark_error(error));
+                }
+            }
+        }))
+    }
 }
 const RESERVED_REQUEST_FIELDS: &[&str] = &["model", "messages", "tools", "tool_choice", "stream", "stream_options",
     "max_tokens", "max_completion_tokens", "n", "temperature", "top_p", "stop",
@@ -306,7 +470,7 @@ impl ReplayCapture {
                         let index = call["index"].as_u64().and_then(|i| usize::try_from(i).ok())
                             .ok_or_else(|| AgentError::new(ErrorCode::ModelProtocol, "missing replay tool index"))?;
                         // Bound the adapter as well as the Core collector.
-                        if index >= 256 { return Err(AgentError::new(ErrorCode::Limit, "replay tool index too large")); }
+                        if index >= MAX_TOOL_CALLS_PER_STEP { return Err(AgentError::new(ErrorCode::Limit, "replay tool index too large")); }
                         let mut changed = false;
                         let data = self.tools.entry(index).or_default();
                         for key in &self.tool_fields {
@@ -324,7 +488,9 @@ impl ReplayCapture {
 }
 fn decode_chunk(data: &str) -> Result<Vec<ModelEvent>> {
     let value: Value = serde_json::from_str(data).map_err(|_| AgentError::new(ErrorCode::ModelProtocol, "invalid SSE JSON"))?;
-    if value.get("error").is_some_and(|error| !error.is_null()) { return Err(AgentError::new(ErrorCode::ModelTransport, "provider emitted an error object")); }
+    if let Some(error) = value.get("error").filter(|error| !error.is_null()) {
+        return Err(classify_provider_error(error));
+    }
     let mut events = vec![];
     if let Some(usage) = value.get("usage") {
         if let (Some(input), Some(output)) = (usage["prompt_tokens"].as_u64(), usage["completion_tokens"].as_u64()) {
@@ -354,8 +520,10 @@ fn decode_chunk(data: &str) -> Result<Vec<ModelEvent>> {
                     .ok_or_else(|| AgentError::new(ErrorCode::ModelProtocol, "missing tool-call index"))?;
                 let function = &call["function"];
                 events.push(ModelEvent::ToolDelta { index,
-                    id: call.get("id").and_then(Value::as_str).map(str::to_owned),
-                    name: function.get("name").and_then(Value::as_str).map(str::to_owned),
+                    // Some compatible providers repeat empty identity placeholders in
+                    // argument-only chunks. They do not replace the established identity.
+                    id: call.get("id").and_then(Value::as_str).filter(|id| !id.is_empty()).map(str::to_owned),
+                    name: function.get("name").and_then(Value::as_str).filter(|name| !name.is_empty()).map(str::to_owned),
                     arguments: function.get("arguments").and_then(Value::as_str).unwrap_or("").to_owned(),
                 });
             }
@@ -377,10 +545,61 @@ mod tests {
     use super::*;
     use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
 
+    fn coalesced_stream(raw: String) -> ModelStream {
+        WireState {
+            body: Box::pin(futures_util::stream::iter(vec![Ok(Bytes::from(raw))])),
+            decoder: SseDecoder::new(64 * 1024), pending: VecDeque::new(),
+            failure: None, output_started: false, done: false,
+            cancel: CancellationToken::new(), received: 0, max_wire: 64 * 1024,
+            replay: ReplayCapture { namespace: "test".into(),
+                message_fields: ["signed_blocks".to_owned()].into_iter().collect(),
+                tool_fields: BTreeSet::new(), message: Map::new(), tools: Default::default() },
+        }.into_stream()
+    }
+    #[tokio::test]
+    async fn coalesced_content_and_failure_preserve_order_usage_and_retry_fence() {
+        for delta in [
+            json!({"content":"partial"}),
+            json!({"reasoning_content":"hidden"}),
+            json!({"tool_calls":[{"index":0,"id":"c","function":{"name":"work","arguments":"{"}}]}),
+            json!({"signed_blocks":["opaque"]}),
+        ] {
+            let first = json!({"choices":[{"delta":delta}]}).to_string();
+            let raw = format!("data: {first}\n\ndata: {{\"choices\":[],\"usage\":{{\"prompt_tokens\":8,\"completion_tokens\":3}}}}\n\ndata: {{\"error\":{{\"code\":\"server_error\"}}}}\n\n");
+            let events = coalesced_stream(raw).collect::<Vec<_>>().await;
+            assert!(events[0].is_ok(), "content must not disappear behind the later error");
+            assert!(events.iter().any(|event| matches!(event, Ok(ModelEvent::Usage(Usage { input_tokens: 8, output_tokens: 3 })))));
+            let error = events.last().unwrap().as_ref().unwrap_err();
+            assert_eq!(error.code, ErrorCode::ModelServer);
+            assert!(error.model_output_started);
+            assert_eq!(events.iter().filter(|event| event.is_err()).count(), 1);
+        }
+    }
+    #[tokio::test]
+    async fn coalesced_error_before_content_does_not_claim_partial_output() {
+        let events = coalesced_stream("data: {\"error\":{\"code\":\"server_error\"}}\n\n".into())
+            .collect::<Vec<_>>().await;
+        assert_eq!(events.len(), 1);
+        assert!(!events[0].as_ref().unwrap_err().model_output_started);
+    }
+
     #[test]
     fn usage_only_frame_is_supported() {
         let events = decode_chunk(r#"{"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":3}}"#).unwrap();
         assert!(matches!(events.as_slice(), [ModelEvent::Usage(Usage { input_tokens: 8, output_tokens: 3 })]));
+    }
+    #[test]
+    fn provider_error_classification_uses_identifiers_and_strict_messages() {
+        assert_eq!(classify_provider_error(&json!({"message":"prompt mentions a context window"})).code, ErrorCode::ModelRequest);
+        assert_eq!(classify_provider_error(&json!({"type":"rate_limit_error", "message":"context window"})).code, ErrorCode::ModelRateLimit);
+        assert_eq!(classify_provider_error(&json!({"message":"context window exceeded"})).code, ErrorCode::ModelContextWindow);
+    }
+    #[test]
+    fn argument_chunks_treat_empty_identity_as_absent() {
+        let events = decode_chunk(r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"","arguments":"17"}}]}}]}"#).unwrap();
+        assert!(matches!(events.as_slice(), [ModelEvent::ToolDelta { index: 0, id: None, name: None, arguments }] if arguments == "17"));
+        let events = decode_chunk(r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"different-id","type":"function","function":{"name":"add","arguments":""}}]}}]}"#).unwrap();
+        assert!(matches!(events.as_slice(), [ModelEvent::ToolDelta { id: Some(id), name: Some(name), .. }] if id == "different-id" && name == "add"));
     }
     #[test]
     fn length_is_not_success() {
@@ -423,6 +642,10 @@ mod tests {
                 assert!(count > 0); received.extend_from_slice(&buffer[..count]);
                 if let Some(end) = received.windows(4).position(|w| w == b"\r\n\r\n") {
                     let headers = String::from_utf8_lossy(&received[..end]);
+                    assert!(headers.lines().any(|line| line.split_once(':').is_some_and(|(name, value)| {
+                        name.eq_ignore_ascii_case("user-agent")
+                            && value.trim() == concat!("mona-agent-core/", env!("CARGO_PKG_VERSION"))
+                    })), "model requests must identify the actual client");
                     let length = headers.lines().find_map(|line| line.split_once(':').and_then(|(k, v)| {
                         if k.eq_ignore_ascii_case("content-length") { v.trim().parse::<usize>().ok() } else { None }
                     })).unwrap();
@@ -472,7 +695,61 @@ mod tests {
         let (endpoint, server) = local_server("", "429 Too Many Requests").await;
         let mut config = ChatConfig::new(endpoint, "test-model"); config.allow_http_loopback = true;
         let model = ChatModel::new(config).unwrap();
-        assert!(model.stream(request(), CancellationToken::new()).await.is_err());
+        let error = match model.stream(request(), CancellationToken::new()).await {
+            Err(error) => error,
+            Ok(_) => panic!("429 unexpectedly opened a model stream"),
+        };
+        assert_eq!(error.code, ErrorCode::ModelRateLimit);
+        assert_eq!(error.http_status, Some(429));
+        server.await.unwrap();
+    }
+    #[tokio::test]
+    async fn http_status_precedence_and_conflict_default_are_stable() {
+        let cases = [
+            (r#"{"error":{"message":"context window"}}"#, "401 Unauthorized", ErrorCode::ModelAuthentication),
+            (r#"{"error":{"message":"context window"}}"#, "402 Payment Required", ErrorCode::ModelQuota),
+            (r#"{"error":{"message":"rate limit exceeded"}}"#, "409 Conflict", ErrorCode::ModelRequest),
+            (r#"{"error":{"code":"overloaded_error","message":"echoed prompt"}}"#, "409 Conflict", ErrorCode::ModelServer),
+        ];
+        for (body, status, expected) in cases {
+            let (endpoint, server) = local_server(body, status).await;
+            let mut config = ChatConfig::new(endpoint, "test-model"); config.allow_http_loopback = true;
+            let model = ChatModel::new(config).unwrap();
+            let error = match model.stream(request(), CancellationToken::new()).await {
+                Err(error) => error,
+                Ok(_) => panic!("HTTP error unexpectedly opened a model stream"),
+            };
+            assert_eq!(error.code, expected);
+            server.await.unwrap();
+        }
+    }
+    #[tokio::test]
+    async fn context_overflow_is_machine_readable_without_exposing_the_body() {
+        let body = r#"{"error":{"code":"context_length_exceeded","message":"SECRET prompt is too long"}}"#;
+        let (endpoint, server) = local_server(body, "400 Bad Request").await;
+        let mut config = ChatConfig::new(endpoint, "test-model"); config.allow_http_loopback = true;
+        let model = ChatModel::new(config).unwrap();
+        let error = match model.stream(request(), CancellationToken::new()).await {
+            Err(error) => error,
+            Ok(_) => panic!("context overflow unexpectedly opened a model stream"),
+        };
+        assert_eq!(error.code, ErrorCode::ModelContextWindow);
+        assert_eq!(error.http_status, Some(400));
+        assert!(!error.message.contains("SECRET"));
+        server.await.unwrap();
+    }
+    #[tokio::test]
+    async fn deterministic_http_request_error_is_not_retryable_transport() {
+        let body = r#"{"error":{"code":"model_not_found","message":"unknown model"}}"#;
+        let (endpoint, server) = local_server(body, "404 Not Found").await;
+        let mut config = ChatConfig::new(endpoint, "test-model"); config.allow_http_loopback = true;
+        let model = ChatModel::new(config).unwrap();
+        let error = match model.stream(request(), CancellationToken::new()).await {
+            Err(error) => error,
+            Ok(_) => panic!("404 unexpectedly opened a model stream"),
+        };
+        assert_eq!(error.code, ErrorCode::ModelRequest);
+        assert_eq!(error.http_status, Some(404));
         server.await.unwrap();
     }
 }
@@ -552,6 +829,14 @@ mod generic_tests {
         assert_eq!(body["max_tokens"], 128);
     }
     #[test]
+    fn context_capacity_only_applies_to_the_configured_model() {
+        let mut c = config(); c.context_window_tokens = Some(8192);
+        let model = ChatModel::new(c).unwrap();
+        assert_eq!(model.context_window_tokens(&ModelOptions::default()), Some(8192));
+        assert_eq!(model.context_window_tokens(&ModelOptions { model: Some("base".into()), ..Default::default() }), Some(8192));
+        assert_eq!(model.context_window_tokens(&ModelOptions { model: Some("alternate".into()), ..Default::default() }), None);
+    }
+    #[test]
     fn provider_options_cannot_override_tools_tokens_or_credentials() {
         for key in ["tools", "max_tokens", "api_key", "endpoint"] {
             let mut c = config(); c.request_option_fields.insert(key.into());
@@ -602,6 +887,15 @@ mod generic_tests {
         assert!(matches!(&events[1], ModelEvent::ProviderData { target: ProtocolTarget::ToolCall { index: 0 }, data } if data.value["signature"] == "s1"));
         let next = capture.capture(r#"{"choices":[{"delta":{"blocks":["replacement"]}}]}"#).unwrap();
         assert!(matches!(&next[0], ModelEvent::ProviderData { data, .. } if data.value["blocks"] == json!(["replacement"])));
+    }
+    #[test]
+    fn replay_index_uses_the_api_tool_call_limit() {
+        let mut capture = ReplayCapture { namespace: "test".into(), message_fields: BTreeSet::new(),
+            tool_fields: ["signature".to_owned()].into_iter().collect(), message: Map::new(), tools: std::collections::BTreeMap::new() };
+        let too_large = json!({"choices":[{"delta":{"tool_calls":[{"index":MAX_TOOL_CALLS_PER_STEP,"signature":"s"}]}}]}).to_string();
+        assert_eq!(capture.capture(&too_large).unwrap_err().code, ErrorCode::Limit);
+        let last_valid = json!({"choices":[{"delta":{"tool_calls":[{"index":MAX_TOOL_CALLS_PER_STEP - 1,"signature":"s"}]}}]}).to_string();
+        assert!(capture.capture(&last_valid).is_ok());
     }
     #[test]
     fn legacy_and_opaque_replay_conflict_is_not_silently_overwritten() {

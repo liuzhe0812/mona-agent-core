@@ -24,9 +24,27 @@ once per Run. All rounds and auxiliary calls that inherit the run model use that
 snapshot. Editing or deleting a provider does not switch an already-running task.
 Bindings remain alive until the underlying session finishes, even if the caller
 drops its handle. Core still owns execution, budgets, cancellation and tool policy.
+`execute()` uses the shared `RunHandle::wait_owned()` contract: dropping its pending
+future cancels that Run, without cancelling a shared task or another Run. `start()`
+and ordinary `wait()` remain passive; a detached observer does not cancel execution.
 The trusted request audit contains an internal `managed:<provider>:<revision>:<sequence>`
 selector; the router replaces it with the actual model ID at the adapter boundary.
 Per-run model overrides and crash recovery are not implemented by this module.
+
+## Model context capacity
+
+`ModelEntry.context_window_tokens: Option<u64>` is a trusted per-provider/per-model
+capacity (1..1,000,000,000). `None` remains unknown. Old JSON records deserialize with
+None; Rust struct literals must explicitly add the new optional field. Model discovery
+returns IDs, not guessed capacities. The formal UI supports setting/clearing the value
+and preserves it when refreshing IDs or toggling visibility.
+
+The captured adapter forwards that model's configured capacity to the existing Model
+contract. Changes do not affect already-bound Runs. The host may import
+`AGENT_MODEL_CONTEXT_TOKENS` only when seeding a new environment-backed provider;
+existing saved values are not overwritten. Runtime/compaction still own output reserve,
+byte limits and approximate pressure decisions; this crate does not implement a meter
+or retry loop. See [API 7](../../docs/MIGRATION-API-7.zh-CN.md).
 
 ## Persistence
 
