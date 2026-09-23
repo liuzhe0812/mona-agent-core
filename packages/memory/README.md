@@ -6,4 +6,4 @@
 
 API 7 的召回结果使用 `ContextTransform::sources` 的 `memory.recall` 来源，每次最多召回 4 项，参考文本最多 12 KiB。来源不改写正式 Transcript，Runtime 在压缩前预留其开销，不将召回内容误认作当前用户请求。真正的长期持久化、检索算法与隐私策略由后端/宿主实现。
 
-验证：`cargo test -p runtime --test plugins` 覆盖记忆投影不改历史、写入默认拒绝。公共上下文变化见 [API 7 迁移](../../docs/MIGRATION-API-7.zh-CN.md)。
+验证：`cargo test -p runtime --test plugins` 覆盖记忆投影不改历史、写入默认拒绝。公共上下文变化见 [上下文契约](../../docs/CONTEXT-MANAGEMENT.zh-CN.md)。

@@ -44,7 +44,7 @@ contract. Changes do not affect already-bound Runs. The host may import
 `AGENT_MODEL_CONTEXT_TOKENS` only when seeding a new environment-backed provider;
 existing saved values are not overwritten. Runtime/compaction still own output reserve,
 byte limits and approximate pressure decisions; this crate does not implement a meter
-or retry loop. See [API 7](../../docs/MIGRATION-API-7.zh-CN.md).
+or retry loop. See [context management](../../docs/CONTEXT-MANAGEMENT.zh-CN.md).
 
 ## Persistence
 

@@ -9,16 +9,18 @@ publish = false
 default = ["model-management", "skills", "compaction", "spill"]
 model-management = ["dep:models"]
 skills = ["dep:skills"]
-compaction = ["dep:compaction"]
+compaction = ["dep:compaction", "sessions/compaction"]
 spill = ["dep:spill"]
 
 [dependencies]
 api.workspace = true
 runtime.workspace = true
-application.workspace = true
+application = { workspace = true, features = ["sessions"] }
 http-bridge.workspace = true
 providers.workspace = true
 tools.workspace = true
+sessions.workspace = true
+instructions.workspace = true
 axum = "0.8"
 tokio.workspace = true
 futures-util.workspace = true

@@ -77,7 +77,7 @@ async fn metadata_audit_does_not_weaken_intent_or_settlement_checkpoint_barriers
         let results = results(&report);
         assert_eq!(results[0].status, if at_settlement { ToolStatus::Success } else { ToolStatus::Skipped });
         assert_eq!(results[1].status, ToolStatus::Skipped);
-        runtime::validate_messages(&report.transcript).unwrap();
+        api::validate_messages(&report.transcript).unwrap();
         host.shutdown().await.unwrap();
     }
 }

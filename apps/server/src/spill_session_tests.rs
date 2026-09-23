@@ -30,7 +30,7 @@ async fn real_shell_uses_one_archive_at_both_sides_of_the_old_threshold_and_afte
     let root = temp.path().join("spill");
     let session_root = temp.path().join("sessions");
     let shell = tools::ShellConfig::discover().unwrap();
-    let sessions = crate::sessions::Store::open(&session_root, temp.path()).unwrap();
+    let sessions = sessions::Store::open(&session_root, temp.path()).unwrap();
     let id = sessions.create("shell-archives").unwrap().id;
     let spill_host = SpillHost { store:Arc::new(LocalSpillStore::new(&root, Default::default()).unwrap()), config:Default::default() };
     let plugin = spill_host.plugin();
@@ -39,7 +39,7 @@ async fn real_shell_uses_one_archive_at_both_sides_of_the_old_threshold_and_afte
     config.read_extensions.push(Arc::new(spill_host.read_extension().with_sessions(sessions.clone())));
     let model = Arc::new(QueueModel::default());
     let mut builder = runtime::HostBuilder::new().model(model.clone())
-        .plugin(Arc::new(plugin)).checkpoint_sink(Arc::new(crate::sessions::SessionSink(sessions.clone()))).unwrap();
+        .plugin(Arc::new(plugin)).checkpoint_sink(Arc::new(sessions::SessionSink(sessions.clone()))).unwrap();
     for tool in tools::core_tools(&config) { builder = builder.tool(tool); }
     let mut host = builder.allow_side_effect_tool("shell").build().await.unwrap();
     let mut artifacts = Vec::new();
@@ -61,12 +61,12 @@ async fn real_shell_uses_one_archive_at_both_sides_of_the_old_threshold_and_afte
         artifacts.push((artifact.uri.clone(), format!("BEGIN{}MIDDLE{}END", "x".repeat(size), "y".repeat(size))));
     }
     host.shutdown().await.unwrap(); drop(host); drop(config); drop(sessions); drop(spill_host);
-    let sessions = crate::sessions::Store::open(&session_root, temp.path()).unwrap();
+    let sessions = sessions::Store::open(&session_root, temp.path()).unwrap();
     let spill_host = SpillHost { store:Arc::new(LocalSpillStore::new(&root, Default::default()).unwrap()), config:Default::default() };
     let mut config = tools::ToolConfig::new(temp.path(), shell);
     config.read_extensions.push(Arc::new(spill_host.read_extension().with_sessions(sessions.clone())));
     let mut host = runtime::HostBuilder::new().model(model.clone()).tool(Arc::new(tools::ReadTool::new(config)))
-        .checkpoint_sink(Arc::new(crate::sessions::SessionSink(sessions.clone()))).unwrap().build().await.unwrap();
+        .checkpoint_sink(Arc::new(sessions::SessionSink(sessions.clone()))).unwrap().build().await.unwrap();
     for (index, (uri, expected)) in artifacts.iter().enumerate() {
         // Full backend read validates the middle and tail, not merely a preview.
         let owner = sessions.source_history(&id).unwrap().iter().find_map(|m| match m {
@@ -125,7 +125,7 @@ fn call(id: &str, name: &str, args: serde_json::Value) -> Vec<ModelEvent> {
 }
 async fn run(
     host: &runtime::Host,
-    sessions: &crate::sessions::Store,
+    sessions: &sessions::Store,
     id: &str,
     key: &str,
     prompt: &str,
@@ -133,14 +133,14 @@ async fn run(
     let doc = sessions.get(id).unwrap();
     let mut history = doc.history().unwrap();
     sessions
-        .prepare(id, doc.header.revision, key, prompt)
+        .prepare(id, doc.header.revision, key, prompt, RunLimits::default().max_initial_history_bytes)
         .unwrap();
     history.push(Message::user(prompt));
     let mut request = RunRequest::new("unused");
     request.messages = history;
     request.metadata = BTreeMap::from([
-        (crate::sessions::SESSION_KEY.into(), id.into()),
-        (crate::sessions::TURN_KEY.into(), key.into()),
+        (sessions::SESSION_KEY.into(), id.into()),
+        (sessions::TURN_KEY.into(), key.into()),
     ]);
     let handle = host.engine().start(request).unwrap();
     sessions.bind(id, key, &handle.run_id).unwrap();
@@ -155,7 +155,7 @@ async fn prior_artifacts_follow_conversation_authority_across_runs_and_repeated_
     let config = SpillConfig::default();
     let archive = Arc::new(LocalSpillStore::new(spill_root.clone(), config.clone()).unwrap());
     let sessions =
-        crate::sessions::Store::open(&temp.path().join("sessions"), temp.path()).unwrap();
+        sessions::Store::open(&temp.path().join("sessions"), temp.path()).unwrap();
     let first = sessions.create("one").unwrap().id;
     let other = sessions.create("other").unwrap().id;
     let spill_host = SpillHost {
@@ -172,7 +172,7 @@ async fn prior_artifacts_follow_conversation_authority_across_runs_and_repeated_
         .tool(Arc::new(LargeTool))
         .tool(Arc::new(tools::ReadTool::new(tools)))
         .plugin(Arc::new(spill_host.plugin()))
-        .checkpoint_sink(Arc::new(crate::sessions::SessionSink(sessions.clone())))
+        .checkpoint_sink(Arc::new(sessions::SessionSink(sessions.clone())))
         .unwrap()
         .build()
         .await

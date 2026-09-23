@@ -1,4 +1,5 @@
-//! Optional coding-host project guidance. Does not grant tool authority or own an Agent loop.
+//! Reusable workspace guidance. Hosts provide roots and optional acknowledged history.
+#![forbid(unsafe_code)]
 use api::*;
 use sha2::{Digest, Sha256};
 use std::{
@@ -21,20 +22,42 @@ struct RunRules {
     delivered: BTreeMap<PathBuf, String>,
     history_loaded: bool,
 }
+/// Trusted history used to rediscover scopes omitted from a compacted working context.
+/// Called on a blocking worker; implementations must bound I/O and honor ctx.cancel.
+pub trait HistorySource: Send + Sync {
+    fn load(&self, ctx: &RunContext) -> Result<Vec<Message>>;
+}
+impl<F> HistorySource for F
+where
+    F: Fn(&RunContext) -> Result<Vec<Message>> + Send + Sync,
+{
+    fn load(&self, ctx: &RunContext) -> Result<Vec<Message>> {
+        self(ctx)
+    }
+}
+
 #[derive(Clone)]
 pub struct ProjectInstructions {
     root: PathBuf,
-    sessions: Option<Arc<crate::sessions::Store>>,
+    history: Option<Arc<dyn HistorySource>>,
     runs: Arc<Mutex<BTreeMap<String, RunRules>>>,
 }
 impl ProjectInstructions {
-    pub fn new(root: &Path, sessions: Option<Arc<crate::sessions::Store>>) -> Result<Self> {
+    pub fn new(root: &Path) -> Result<Self> {
         Ok(Self {
             root: fs::canonicalize(root)
                 .map_err(|_| failure("project instruction root is unavailable"))?,
-            sessions,
+            history: None,
             runs: Arc::new(Mutex::new(BTreeMap::new())),
         })
+    }
+    pub fn with_history(mut self, history: Arc<dyn HistorySource>) -> Self {
+        self.history = Some(history);
+        self
+    }
+    /// Installs the same shared instance as both a context source and a dispatch policy.
+    pub fn plugin(self) -> InstructionsPlugin {
+        InstructionsPlugin(Arc::new(self))
     }
     fn state(&self, run: &str, cancel: &CancellationToken) -> Result<RunRules> {
         let mut runs = self
@@ -53,10 +76,7 @@ impl ProjectInstructions {
         Ok(runs.entry(run.into()).or_default().clone())
     }
     fn directory(&self, path: &str) -> Result<Option<PathBuf>> {
-        if path.is_empty()
-            || path.contains('\0')
-            || path.starts_with("spill:")
-        {
+        if path.is_empty() || path.contains('\0') || path.starts_with("spill:") {
             return Ok(None);
         }
         let value = Path::new(path);
@@ -249,12 +269,8 @@ impl ContextTransform for ProjectInstructions {
         tokio::task::spawn_blocking(move || {
             let mut state = this.state(&ctx.run_id, &ctx.cancel)?;
             if !state.history_loaded {
-                if let (Some(store), Some(session)) =
-                    (&this.sessions, ctx.metadata.get("mona.session_id"))
-                {
-                    let history = store
-                        .source_history(session)
-                        .map_err(|_| failure("saved project context could not be read"))?;
+                if let Some(source) = &this.history {
+                    let history = source.load(&ctx)?;
                     this.add_messages(&mut state.directories, &history)?;
                 }
                 state.history_loaded = true;
@@ -325,6 +341,18 @@ impl ToolPolicy for ProjectInstructions {
     }
 }
 
+pub struct InstructionsPlugin(Arc<ProjectInstructions>);
+#[async_trait]
+impl Plugin for InstructionsPlugin {
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new("instructions")
+    }
+    async fn install(&self, registrar: &mut dyn Registrar) -> Result<()> {
+        registrar.context_transform(self.0.clone());
+        registrar.policy(self.0.clone());
+        Ok(())
+    }
+}
+
 #[cfg(test)]
-#[path = "instructions_tests.rs"]
 mod tests;

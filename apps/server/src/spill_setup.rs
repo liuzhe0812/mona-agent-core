@@ -66,11 +66,11 @@ impl tools::OutputArchive for SpillOutputArchive {
 pub struct SpillReadExtension {
     store: Arc<dyn SpillStore>,
     max_page_bytes: usize,
-    sessions: Option<Arc<crate::sessions::Store>>,
+    sessions: Option<Arc<sessions::Store>>,
 }
 
 impl SpillReadExtension {
-    pub fn with_sessions(mut self, store: Arc<crate::sessions::Store>) -> Self {
+    pub fn with_sessions(mut self, store: Arc<sessions::Store>) -> Self {
         self.sessions = Some(store); self
     }
 }
@@ -91,7 +91,7 @@ impl tools::ReadExtension for SpillReadExtension {
         let id = path.strip_prefix(spill::SPILL_URI_SCHEME).ok_or_else(|| {
             api::AgentError::new(api::ErrorCode::Schema, "invalid spill artifact path")
         })?;
-        let owner = match (&self.sessions, ctx.run.metadata.get(crate::sessions::SESSION_KEY)) {
+        let owner = match (&self.sessions, ctx.run.metadata.get(sessions::SESSION_KEY)) {
             (Some(store), Some(session)) => {
                 let store = store.clone(); let session = session.clone(); let run = ctx.run.run_id.clone(); let uri = path.to_owned();
                 tokio::task::spawn_blocking(move || store.artifact_owner(&session, &run, &uri)).await

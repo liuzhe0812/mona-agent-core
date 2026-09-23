@@ -12,6 +12,7 @@ mod protocol;
 mod run;
 mod streaming;
 mod tool;
+mod validation;
 
 pub use async_trait::async_trait;
 pub use checkpoint::*;
@@ -27,4 +28,5 @@ pub use run::*;
 pub use streaming::*;
 pub use tokio_util::sync::CancellationToken;
 pub use tool::*;
-pub const API_VERSION: u32 = 7;
+pub use validation::validate_messages;
+pub const API_VERSION: u32 = 8;

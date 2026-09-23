@@ -11,12 +11,14 @@ import { fileURLToPath } from 'node:url';
 import { startUiServer } from '../../../scripts/dev-web.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
-const output = join(root, '.tmp-verify/context-browser-report');
+const output = resolve(process.env.MONA_TEST_REPORT_DIR || join(root, 'target/browser-reports/context'));
 const scratch = await mkdtemp(join(tmpdir(), 'mona-context-e2e-'));
 const workspace = join(scratch, 'workspace'), state = join(scratch, 'state');
 await mkdir(workspace); await mkdir(state); await mkdir(output, { recursive: true });
 const skillRoot = join(workspace, '.agents', 'skills');
 await mkdir(join(skillRoot, 'context-check'), { recursive: true });
+await mkdir(join(scratch, '.agents/skills/wrong-workspace'), { recursive: true });
+await writeFile(join(scratch, '.agents/skills/wrong-workspace/SKILL.md'), '---\nname: wrong-workspace\ndescription: MUST_NOT_LOAD_STARTUP_DIRECTORY\n---\nDecoy.\n');
 await writeFile(join(skillRoot, 'context-check', 'SKILL.md'), '---\nname: context-check\ndescription: Test-only contextual skill catalog marker.\n---\nPRIVATE_SKILL_BODY_NOT_EAGERLY_LOADED\n');
 await writeFile(join(workspace, 'AGENTS.md'), 'PROJECT_CONTEXT_RULE_ALPHA: preserve existing work.\n');
 await writeFile(join(workspace, 'agent.toml'), 'version = 1\n[capabilities.skills]\nenabled = true\nuser_configurable = true\n');
@@ -79,9 +81,9 @@ async function startHost(origin) {
     AGENT_ALLOW_HTTP_LOOPBACK: '1', AGENT_MODEL_STORE_KEY: 'isolated-test-storage-key-not-a-real-secret',
     AGENT_MODEL_SETTINGS_PATH: join(state, 'models.enc'), AGENT_CAPABILITY_STATE_PATH: join(state, 'capabilities.json'),
     AGENT_SESSIONS_DIR: join(state, 'sessions'), AGENT_SPILL_DIR: join(state, 'spill'), AGENT_WORKSPACE_DIR: workspace,
-    AGENT_SKILL_DIRS: skillRoot, LOCALAPPDATA: state, XDG_STATE_HOME: state });
+    USERPROFILE: join(state, 'user'), HOME: join(state, 'user'), LOCALAPPDATA: state, XDG_STATE_HOME: state });
   const binary = resolve(process.env.MONA_TEST_SERVER || join(root, 'target', 'context-validation', 'debug', process.platform === 'win32' ? 'server.exe' : 'server'));
-  await access(binary); host = spawn(binary, [], { cwd: workspace, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  await access(binary); host = spawn(binary, ['--config', join(workspace, 'agent.toml')], { cwd: scratch, env, stdio: ['ignore', 'pipe', 'pipe'] });
   host.stderr.on('data', chunk => { hostLog = (hostLog + chunk).slice(-10000); });
   host.on('error', error => errors.push(`host: ${error.message}`));
   await waitFor(async () => { if (host.exitCode != null) throw new Error(`host exited: ${hostLog}`); try { return (await api('/v1/info')).protocol_version === 2; } catch { return false; } }, 'host ready');
@@ -134,7 +136,7 @@ try {
     if (value.method === 'Runtime.exceptionThrown') errors.push(value.params.exceptionDetails.exception?.description || 'browser exception'); });
   await cdp('Page.enable'); await cdp('Runtime.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "window.__contextErrors=[];addEventListener('error',e=>window.__contextErrors.push(String(e.message)));addEventListener('unhandledrejection',e=>window.__contextErrors.push(String(e.reason)))" });
-  await cdp('Page.navigate', { url: origin }); await waitPage("document.querySelector('#status-dot')?.dataset.connected==='true'", 'UI connected');
+  await cdp('Page.navigate', { url: origin }); await waitPage("document.querySelector('#sessions-notice')?.textContent.includes('已保存在宿主本地') && !document.querySelector('#sessions-refresh').disabled", 'persistent session UI ready');
   await click('#settings-button'); await click('#settings-models-tab'); await click('#add-provider');
   await fill('#provider-name-input', '隔离上下文验证'); await fill('#provider-api-base-input', modelBase); await fill('#provider-models-input', 'context-fixture'); await click('#provider-save');
   await waitPage("!document.querySelector('#provider-dialog').open && document.querySelector('[data-model-context]')", 'provider saved from UI');
@@ -151,6 +153,7 @@ try {
   const firstPrompt = 'FIRST_MARKER decision 31415 ' + 'A'.repeat(18000);
   await submit(firstPrompt, 1); check('short context avoids a summary call', summaries === 0);
   const firstRequest = primary()[0], firstText = JSON.stringify(firstRequest);
+  check('skills use the configured workspace rather than the server startup directory', firstText.includes('context-check') && !firstText.includes('MUST_NOT_LOAD_STARTUP_DIRECTORY'));
   check('project rules and skill catalog are supplied once without eager skill body loading', firstText.includes('PROJECT_CONTEXT_RULE_ALPHA') && firstText.includes('context-check') && !firstText.includes('PRIVATE_SKILL_BODY_NOT_EAGERLY_LOADED') && firstRequest.messages.filter(m => String(m.content).startsWith('[Host context source: project.instructions')).length === 1);
   await submit('SECOND_MARKER ' + 'B'.repeat(14000), 2);
   check('configured model window triggers compaction below the byte ceiling', summaries === 1 && requests.every(request => Buffer.byteLength(JSON.stringify(request)) < 256 * 1024));

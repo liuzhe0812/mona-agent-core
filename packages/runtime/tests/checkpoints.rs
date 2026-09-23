@@ -117,7 +117,7 @@ async fn failed_after_model_or_intent_commit_never_dispatches_the_tool() {
         assert_eq!(report.error.as_ref().unwrap().code, ErrorCode::Checkpoint);
         assert_eq!(tool.probe.count.load(Ordering::SeqCst), 0);
         assert_eq!(results(&report)[0].status, ToolStatus::Skipped);
-        runtime::validate_messages(&report.transcript).unwrap();
+        api::validate_messages(&report.transcript).unwrap();
         host.shutdown().await.unwrap();
     }
 }

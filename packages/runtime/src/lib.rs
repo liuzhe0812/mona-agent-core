@@ -14,4 +14,3 @@ mod validation;
 pub use engine::Engine;
 pub use api::RunHandle;
 pub use host::{Host, HostBuilder};
-pub use validation::validate_messages;

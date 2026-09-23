@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { startUiServer } from '../../../scripts/dev-web.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
-const output = join(root, '.tmp-verify/session-browser-report');
+const output = resolve(process.env.MONA_TEST_REPORT_DIR || join(root, 'target/browser-reports/sessions'));
 const scratch = await mkdtemp(join(tmpdir(), 'mona-sessions-e2e-'));
 const workspace = join(scratch, 'workspace'); const state = join(scratch, 'state');
 await mkdir(workspace); await mkdir(state); await mkdir(output, { recursive: true });
@@ -344,7 +344,7 @@ try {
   await evaluate("document.querySelector('#search-dialog').close()");
   check('browser has no unhandled exceptions', (await evaluate('window.__sessionErrors')).length===0 && errors.length===0);
   await writeFile(join(output,'result.json'),JSON.stringify({passed:true,checks,model_requests:requests.length,isolated:true,real_provider:false},null,2));
-  console.log(`PASS ${checks.length} end-to-end assertions; screenshots in .tmp-verify/session-browser-report`);
+  console.log(`PASS ${checks.length} end-to-end assertions; screenshots in ${output}`);
 } catch (error) {
   console.error(error); console.error(hostLog);
   if (socket?.readyState===WebSocket.OPEN) {

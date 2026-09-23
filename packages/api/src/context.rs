@@ -1,6 +1,6 @@
 use crate::{
-    AgentError, ErrorCode, Message, ModelCaller, ModelOptions, ModelRequest, Result, RunLimits, Services, TaskControl, ToolCall,
-    ToolResult, ToolSpec,
+    AgentError, ErrorCode, Message, ModelCaller, ModelOptions, ModelRequest, Result, RunLimits,
+    Services, TaskControl, ToolCall, ToolResult, ToolSpec,
 };
 use async_trait::async_trait;
 use std::{
@@ -17,12 +17,21 @@ pub struct ContextBlock {
 }
 impl ContextBlock {
     pub fn new(source: impl Into<String>, content: impl Into<String>) -> Self {
-        Self { source: source.into(), content: content.into() }
+        Self {
+            source: source.into(),
+            content: content.into(),
+        }
     }
     pub fn validate(&self) -> Result<()> {
-        if self.source.is_empty() || self.source.len() > 512 || self.source.chars().any(char::is_control)
-            || self.content.len() > 128 * 1024 {
-            return Err(AgentError::new(ErrorCode::Limit, "context source identifier or content exceeds its bound"));
+        if self.source.is_empty()
+            || self.source.len() > 512
+            || self.source.chars().any(char::is_control)
+            || self.content.len() > 128 * 1024
+        {
+            return Err(AgentError::new(
+                ErrorCode::Limit,
+                "context source identifier or content exceeds its bound",
+            ));
         }
         Ok(())
     }
@@ -62,13 +71,23 @@ pub struct RunContext {
 impl RunContext {
     /// Attach sources after leading system messages, not between a tool call and its results.
     pub fn with_sources(&self, mut messages: Vec<Message>) -> Vec<Message> {
-        let position = messages.iter().take_while(|m| matches!(m, Message::System { .. })).count();
-        messages.splice(position..position, self.context_sources.iter().map(ContextBlock::message));
+        let position = messages
+            .iter()
+            .take_while(|m| matches!(m, Message::System { .. }))
+            .count();
+        messages.splice(
+            position..position,
+            self.context_sources.iter().map(ContextBlock::message),
+        );
         messages
     }
     pub fn model_request(&self, messages: Vec<Message>) -> ModelRequest {
-        ModelRequest { messages: self.with_sources(messages), tools: self.request_tools.as_ref().clone(),
-            max_output_tokens: self.limits.max_output_tokens, options: self.model_options.clone() }
+        ModelRequest {
+            messages: self.with_sources(messages),
+            tools: self.request_tools.as_ref().clone(),
+            max_output_tokens: self.limits.max_output_tokens,
+            options: self.model_options.clone(),
+        }
     }
 
     pub fn max_message_bytes(&self) -> usize {

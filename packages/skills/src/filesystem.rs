@@ -63,12 +63,10 @@ impl LocalSkills {
         if !valid_name(&id) {
             return Err(error(ErrorCode::Configuration, "invalid skill provider ID"));
         }
-        let cwd = std::env::current_dir().map_err(|_| {
-            error(
-                ErrorCode::Configuration,
-                "cannot resolve the current directory",
-            )
-        })?;
+        // Absolute host-supplied roots need no process-global working directory.
+        let cwd = if roots.iter().any(|root| !root.is_absolute()) {
+            std::env::current_dir().map_err(|_| error(ErrorCode::Configuration, "cannot resolve relative skill roots"))?
+        } else { PathBuf::new() };
         let roots = roots
             .into_iter()
             .map(|root| {

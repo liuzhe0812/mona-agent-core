@@ -3,6 +3,8 @@
 
 mod catalog;
 mod filesystem;
+mod discovery;
+pub use discovery::discovery_roots;
 pub use catalog::{SkillCatalogTransform, SkillsPlugin};
 pub use filesystem::LocalSkills;
 

@@ -1,6 +1,6 @@
 mod support;
 use api::*;
-use runtime::{validate_messages, HostBuilder};
+use runtime::HostBuilder;
 use serde_json::json;
 use std::{collections::BTreeSet, sync::{Arc, atomic::{AtomicUsize, Ordering}}, time::Duration};
 use support::*;

@@ -103,6 +103,9 @@ dependencies = [
  "runtime",
  "serde",
  "serde_json",
+ "sessions",
+ "sha2",
+ "tempfile",
  "tokio",
 ]
 
@@ -1778,6 +1781,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "instructions"
+version = "0.3.0"
+dependencies = [
+ "api",
+ "futures-util",
+ "runtime",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tools",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3350,12 +3367,14 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "http-bridge",
+ "instructions",
  "models",
  "providers",
  "reqwest 0.12.28",
  "runtime",
  "serde",
  "serde_json",
+ "sessions",
  "sha2",
  "skills",
  "spill",
@@ -3376,6 +3395,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "170fb83ab34de17dc69aa7c67482b22218ddb85da56546f9bd6b929e32a05930"
 dependencies = [
  "stable_deref_trait",
+]
+
+[[package]]
+name = "sessions"
+version = "0.3.0"
+dependencies = [
+ "api",
+ "compaction",
+ "futures-util",
+ "instructions",
+ "runtime",
+ "serde",
+ "serde_json",
+ "sha2",
+ "skills",
+ "tempfile",
+ "tokio",
+ "tools",
 ]
 
 [[package]]

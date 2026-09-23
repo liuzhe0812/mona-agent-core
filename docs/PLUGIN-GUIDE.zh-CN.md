@@ -39,7 +39,9 @@ Manifest 指定 id、api_version、requires、provides。requires/provides 是�
 | `tool_selector` | `ToolSelector` | 在Run上限内选择本轮工具，同轮只能继续收紧 |
 | `checkpoint_sink` | `CheckpointSink` | 安装一个可等待的执行记录提交实现，不是UI观察器 |
 
-API 7 的目录、规则、记忆等注入组件应通过 `ContextTransform::sources` 返回唯一来源的 `ContextBlock`，普通 `transform` 处理真实对话。不要两处重复注入，或把来源伪装为最后一个用户请求。压缩策略仍属于独立组件，执行器只处理预算、时序与校验。新增 RunContext 字段和可选计量接口见 [API 7 迁移](MIGRATION-API-7.zh-CN.md)。
+API 7 的目录、规则、记忆等注入组件应通过 `ContextTransform::sources` 返回唯一来源的 `ContextBlock`，普通 `transform` 处理真实对话。不要两处重复注入，或把来源伪装为最后一个用户请求。压缩策略仍属于独立组件，执行器只处理预算、时序与校验。计量、来源与恢复契约见[上下文管理](CONTEXT-MANAGEMENT.zh-CN.md)。
+
+会话、规则和 Skills 的独立接入分别见 [sessions](../packages/sessions/README.md)、[instructions](../packages/instructions/README.md)、[skills](../packages/skills/README.md)。普通接口先独立可用；会话 Sink 与运行收尾不依赖 Web，规则 Plugin 只注册同一实例的来源和派发策略。
 
 ### 模型服务
 

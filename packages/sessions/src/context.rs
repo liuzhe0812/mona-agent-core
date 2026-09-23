@@ -67,15 +67,15 @@ impl Document {
                 let turn = self.body.turns.last().ok_or_else(corrupt)?;
                 messages.push(Message::user(&turn.prompt));
             }
-        } else {
-            // Read-only migration of version-1 full-transcript conversations.
-            let next = self.body.checkpoint_turn.map_or(0, |n| n + 1);
-            for turn in self.body.turns.iter().skip(next) {
-                messages.push(Message::user(&turn.prompt));
-            }
+        } else if !self.body.turns.is_empty()
+            || self.body.checkpoint.is_some()
+            || self.body.compaction.is_some()
+        {
+            // Only an empty new session has no working-prefix identity.
+            return Err(corrupt());
         }
         if !messages.is_empty() {
-            runtime::validate_messages(&messages).map_err(|_| corrupt())?;
+            api::validate_messages(&messages).map_err(|_| corrupt())?;
         }
         Ok(messages)
     }
@@ -97,7 +97,7 @@ impl Document {
             let mut archive = self.body.archive.clone();
             archive.extend_from_slice(&working[base.input_messages..]);
             if !archive.is_empty() {
-                runtime::validate_messages(&archive).map_err(|_| corrupt())?;
+                api::validate_messages(&archive).map_err(|_| corrupt())?;
             }
             Ok(archive)
         } else {
@@ -124,6 +124,7 @@ impl Document {
         &mut self,
         use_compaction: bool,
         prompt: &str,
+        admission_bytes: usize,
     ) -> Result<Vec<Message>> {
         let history = self.next_workset(use_compaction)?;
         let bytes = serde_json::to_vec(&history)
@@ -134,11 +135,14 @@ impl Document {
                     .map_err(io_error)?
                     .len(),
             )
-            .saturating_add(1);
-        // The formal host uses the API default admission bound. Reject BEFORE replacing
-        // a usable saved workset (notably when compaction was temporarily disabled).
-        if bytes > RunLimits::default().max_initial_history_bytes {
-            return Err(error(Code::Capacity, "模型工作上下文超过本地宿主的 4 MiB 接纳上限；旧记录与摘要状态未改动，请启用压缩或新建会话。"));
+            .saturating_add(usize::from(!history.is_empty()));
+        // Reject before replacing a usable saved workset. The host supplies the
+        // admission bound of the actual execution configuration.
+        if bytes > admission_bytes {
+            return Err(error(
+                Code::Capacity,
+                "模型工作上下文超过宿主接纳上限；旧记录与摘要状态未改动，请调整装配或新建会话。",
+            ));
         }
         let archive = self.history()?;
         self.body.base = Some(RunBase {

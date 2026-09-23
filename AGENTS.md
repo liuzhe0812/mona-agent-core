@@ -11,7 +11,7 @@
 | 部分 | 职责与位置 |
 |---|---|
 | 核心层 | `packages/api` 定义通用契约；`packages/runtime` 维护唯一执行循环、当前运行状态、模型网关、工具调度、预算、取消、权限和必要扩展时点 |
-| 扩展层 | `providers`、`tools`、`models`、`compaction`、`spill`、`skills`、`memory`、`planner` 等提供具体能力；会话、存储与规则按实际复用需求组织，不能绑定 Web 才能使用 |
+| 扩展层 | `providers`、`tools`、`models`、`sessions`、`instructions`、`compaction`、`spill`、`skills`、`memory`、`planner` 提供可复用能力，不依赖 Web 才能使用 |
 | 产品层（Web） | `apps/server` 装配能力、管理配置与授权；`apps/web` 提供交互与展示；`application` 管理任务调用、幂等与订阅；HTTP/Tauri Bridge 和 `client` 负责传输适配 |
 | 示例 | `examples/` 验证接入与组合，不代替正式能力实现 |
 

@@ -6,7 +6,6 @@ use crate::{
     host::Registry,
     model::Gateway,
     tools::execute_batch,
-    validation::validate_messages,
 };
 use api::*;
 use futures_util::FutureExt;

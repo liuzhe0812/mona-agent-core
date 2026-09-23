@@ -1,6 +1,10 @@
 //! Small, explicit reference catalog; authorization comes from Store, never from this prompt text.
-use super::*;
-use std::collections::BTreeSet;
+use crate::{disk, Store, SESSION_KEY};
+use api::*;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 pub struct SessionReferences {
     store: Arc<Store>,

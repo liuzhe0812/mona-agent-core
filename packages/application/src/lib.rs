@@ -4,6 +4,8 @@
 mod protocol;
 mod service;
 mod subscription;
+#[cfg(feature = "sessions")]
+pub mod sessions;
 
 pub use protocol::*;
 pub use service::{AgentApplication, ApplicationConfig};

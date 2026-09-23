@@ -66,6 +66,10 @@ fn resource_reference_is_a_descriptor_not_file_contents() {
     c.validate().unwrap();
     assert_eq!(c.text(), "");
     assert!(!c.preview().contains("123"));
+    let unsafe_ui = UiToolResult::from_result(&ToolResult::new("resource", ToolStatus::Success, c));
+    let unsafe_json = serde_json::to_value(unsafe_ui).unwrap();
+    assert!(unsafe_json["redacted"].as_bool().unwrap());
+    assert!(unsafe_json["blocks"][0]["reference"].is_null());
 }
 
 #[test]
@@ -107,14 +111,51 @@ fn public_tool_result_does_not_copy_media_or_structured_secrets() {
         },
     ]));
     output.structured = Some(json!({"private":"not-for-ui"}));
+    output.artifact = Some(ArtifactRef {
+        uri: "file:C:/private/result.txt".into(),
+        bytes: 12,
+    });
     let result = ToolResult::from_output("one", output);
     let ui = UiToolResult::from_result(&result);
     let encoded = serde_json::to_value(&ui).unwrap();
     assert!(encoded["content"].is_string());
     assert!(ui.truncated);
+    assert!(ui.redacted);
+    assert_eq!(encoded["blocks"][1]["source"]["kind"], "redacted");
     assert!(!encoded.to_string().contains("private-token"));
     assert!(!encoded.to_string().contains("not-for-ui"));
+    assert!(!encoded.to_string().contains("private/result.txt"));
+    assert!(encoded["artifact"].is_null());
     assert_eq!(STREAM_VERSION, 2);
+}
+
+#[test]
+fn public_tool_result_keeps_bounded_inline_image_bytes() {
+    let resource = Content::from(vec![ContentBlock::Resource {
+        reference: ArtifactRef {
+            uri: "spill:sp_safe_resource".into(),
+            bytes: 7,
+        },
+        media_type: "text/plain".into(),
+        name: Some("safe.txt".into()),
+    }]);
+    let resource_ui =
+        UiToolResult::from_result(&ToolResult::new("resource", ToolStatus::Success, resource));
+    let resource_json = serde_json::to_value(resource_ui).unwrap();
+    assert_eq!(
+        resource_json["blocks"][0]["reference"]["uri"],
+        "spill:sp_safe_resource"
+    );
+    let result = ToolResult::new(
+        "image",
+        ToolStatus::Success,
+        Content::from(vec![image("AQ==")]),
+    );
+    let ui = UiToolResult::from_result(&result);
+    let encoded = serde_json::to_value(ui).unwrap();
+    assert_eq!(encoded["blocks"][0]["source"]["kind"], "base64");
+    assert_eq!(encoded["blocks"][0]["source"]["data"], "AQ==");
+    assert_eq!(encoded["redacted"], false);
 }
 
 #[test]
@@ -205,7 +246,7 @@ fn artifact_bytes_are_part_of_result_budget() {
 
 #[test]
 fn rust_api_version_and_ui_protocol_are_independent() {
-    assert_eq!(API_VERSION, 7);
+    assert_eq!(API_VERSION, 8);
     assert_eq!(STREAM_VERSION, 2);
     assert_eq!(CHECKPOINT_VERSION, 1);
 }

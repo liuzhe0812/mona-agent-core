@@ -1,4 +1,4 @@
-use crate::{gate::{bounded, lock, CancelOnDrop}, validation::{valid_name, validate_messages}};
+use crate::{gate::{bounded, lock, CancelOnDrop}, validation::valid_name};
 use api::*;
 use futures_util::StreamExt;
 use std::{collections::BTreeMap, sync::{Arc, Mutex}, time::Duration};

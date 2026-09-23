@@ -2,13 +2,13 @@
 
 ## 已实现的职责划分
 
-没有新增万能 `context` 包或第二套 Agent 循环。`api` 定义小型上下文契约，Runtime 控制收集、压缩、请求、校验与有限恢复的时序；`models/providers` 提供实际模型窗口；`compaction` 拥有摘要算法与可序列化状态；正式 Server 拥有完整历史、工作集、项目规则和归档授权。Skills、Memory 仍是各自独立的上下文来源。
+没有新增万能 `context` 包或第二套 Agent 循环。`api` 定义小型上下文契约，Runtime 控制收集、压缩、请求、校验与有限恢复的时序；`models/providers` 提供实际模型窗口；`compaction` 拥有摘要算法与可序列化状态；`sessions` 扩展保存完整历史、工作集并校验归档归属；`instructions` 扩展发现和刷新规则；Server 只提供装配、配置及产品授权。Skills、Memory 仍是各自独立的上下文来源。
 
-本轮把 Rust 插件 API 升到 7；HTTP/Tauri 的 Stream v2、RunCheckpoint v1 不变。会话文件格式升到 2，兼容读取格式 1，在下一次成功写入时迁移。详见 [API 7 迁移](MIGRATION-API-7.zh-CN.md)和[本地会话](LOCAL-SESSIONS.zh-CN.md)。
+当前 Rust API 为 7、HTTP/Tauri Stream 为 2、RunCheckpoint 为 1。会话仅支持当前格式 2，旧格式读取与迁移已删除。详见[会话扩展](../packages/sessions/README.md)和[Web 本地会话](LOCAL-SESSIONS.zh-CN.md)。
 
 ## 1. 模型窗口与计量
 
-模型设置页可以为每个供应商下的每个模型填写 `context_window_tokens`。未知保持空值；接受 1–1,000,000,000 的整数，不把通用 `/models` 列表臆测为容量目录。编辑、发现模型和显示开关会保留已配置值。旧 JSON 缺少字段时仍可读取。
+模型设置页可以为每个供应商下的每个模型填写 `context_window_tokens`。未知保持空值；接受 1–1,000,000,000 的整数，不把通用 `/models` 列表臆测为容量目录。编辑、发现模型和显示开关会保留已配置值。未指定容量仍按未知处理，不猜测窗口。
 
 新 Run 绑定模型时连同窗口一并固定，修改设置只影响随后启动的 Run。已有 Provider 和 Router 窗口契约继续使用，不把供应商名称当作统一窗口，也不让切换模型借用另一模型容量。摘要继承同一实际路由，但使用自己的输出预留量。
 
@@ -34,13 +34,13 @@
 
 宿主在原有可等待检查点里捕获这份状态；每 Run 的临时摘要缓存仍在 `finish` 清理。下一轮先应用已确认状态，再保存该轮工作前缀的长度与哈希、此前档案的哈希。随后将本轮检查点中新产生的消息接回完整档案。摘要范围、档案与检查点同文件原子提交，不另开异步保存支路。
 
-这允许完整历史超过默认 4 MiB 接纳上限时，仍从较小的已确认工作集续聊；没有放大或取消 Runtime 的保护上限。会话文件仍有 32 MiB 总上限、512 轮限制，检查点仍有独立上限。关闭压缩时使用完整历史，过大的历史会明确拒绝。旧会话兼容读取不等于无限历史导入：没有可验证压缩状态且工作输入本身超过保护上限时，不会静默裁切原文或在网关外调用模型。
+这允许完整历史超过默认 4 MiB 接纳上限时，仍从较小的已确认工作集续聊；没有放大或取消 Runtime 的保护上限。会话文件仍有 32 MiB 总上限、512 轮限制，检查点仍有独立上限。关闭压缩时使用完整历史，过大的历史会明确拒绝。没有可验证压缩状态且工作输入本身超过保护上限时，不会静默裁切原文或在网关外调用模型。
 
 进程重启只恢复已确认记录和工作集，不自动重跑模型或工具。中断工具沿用 Pending→Skipped、已确认 intent 但结果未知→Unknown、已确认结果→原结果的规则。未确认的流式 token 不被伪造成完整回答。
 
 ## 4. 同会话历史归档
 
-Spill 底层仍按 Run 隔离。正式宿主的 `read` 扩展在当前 Run 属于该会话的前提下，从确认过的结构化 ArtifactRef 查找最初拥有文件的 Run；用户正文里的 URI、模型摘要里的字符串和另一会话的引用均不授予访问权限。重复读取产生的相同引用不会覆盖原文件归属。
+Spill 底层仍按 Run 隔离。宿主的 `read` 适配调用 `sessions::Store::artifact_owner`，验证当前 Run 属于该会话后，从确认过的结构化 ArtifactRef 查找最初拥有文件的 Run；用户正文里的 URI、模型摘要里的字符串和另一会话的引用均不授予访问权限。重复读取产生的相同引用不会覆盖原文件归属。
 
 `session.artifacts` 来源提供该会话已确认引用的小型目录，帮助摘要后的模型找到准确引用；目录不是授权凭据，读取时仍独立验证。目录最多 64 KiB；模型只得到不透明标识，不得到任意本机路径能力。
 
@@ -50,7 +50,7 @@ Spill 仍按自己的保留策略清理，默认 24 小时；不是永久附件�
 
 当前 Web 宿主装配 `instructions` 组件，默认开启，可在“设置 → Agent 组件 → 项目规则”关闭并在下次启动生效；部署者可用 `AGENT_INSTRUCTIONS=0` 锁定关闭。部署锁定后该项不会显示为用户设置。Runtime 本身不读取文件，未装配此组件的嵌入方式不受影响。
 
-规则从宿主指定工作空间根开始。每个目录优先 `AGENTS.md`，不存在时使用 `CLAUDE.md`；不会递归扫描整个项目，也不读取工作空间之外的用户全局规则。结构化 `read/write/edit/grep/find/ls` 路径使对应目录及祖先规则变得相关。新 Run 会从该会话完整档案恢复已经接触过的目录，不依赖摘要保留每个文件名。
+规则从宿主指定工作空间根开始。每个目录优先 `AGENTS.md`，不存在时使用 `CLAUDE.md`；不会递归扫描整个项目，也不读取工作空间之外的用户全局规则。结构化 `read/write/edit/grep/find/ls` 路径使对应目录及祖先规则变得相关。规则扩展通过宿主注入的 `HistorySource` 恢复完整档案中已触达的目录，不依赖摘要保留每个文件名；它不依赖具体会话后端。
 
 每次构建模型请求重新读取适用规则，显示来源和目录作用域，更新与删除不会永久滞留。若写文件等副作用工具首次进入带有新规则的目录，或模型回答之后规则改变，该次工具会返回“未派发、先依据新规则重新判断”；下一轮请求带上新规则，只有模型重新发起调用后才执行。既有权限关口仍可否决。动态策略在每个工具 intent 确认后、实际派发前检查一次，因此同批先修改规则再写文件也会拒绝旧决定；不能把 intent 记录当成工具已实际执行。
 
@@ -67,6 +67,8 @@ Spill 仍按自己的保留策略清理，默认 24 小时；不是永久附件�
 ## 验证入口
 
 ```sh
+cargo test --offline -p sessions --features compaction
+cargo test --offline -p instructions -p skills
 cargo test --offline -p compaction -p runtime
 cargo test --offline -p server --bin server
 cargo test --offline -p server --no-default-features --bin server
@@ -75,25 +77,6 @@ cargo build --offline -p server --target-dir target/context-validation
 node apps/web/test/context-e2e.mjs
 ```
 
-浏览器测试使用隔离的空状态目录、随机端口、受控 HTTP/SSE 模型、真实 Rust shell/read/Spill，以及自己创建并重启的宿主。模型设置经过正式页面保存；不使用开发者 .env、不调用付费供应商、不停止开发者正在使用的服务。`MONA_TEST_SERVER` 可指定其他隔离二进制，`BROWSER_BIN` 可指定浏览器。结果保存在 `.tmp-verify/context-browser-report`。
+浏览器测试使用隔离的空状态目录、随机端口、受控 HTTP/SSE 模型、真实 Rust shell/read/Spill，以及自己创建并重启的宿主。模型设置经过正式页面保存；不使用开发者 .env、不调用付费供应商、不停止开发者正在使用的服务。`MONA_TEST_SERVER` 可指定其他隔离二进制，`BROWSER_BIN` 可指定浏览器。结果默认保存在忽略目录 `target/browser-reports/context`，可通过 `MONA_TEST_REPORT_DIR` 指定。
 
-测试包含：固定模型窗口下主动压缩、同一摘要跨 Run/重启复用、旧格式迁移、超过 Core 原始接纳上限的历史档案、篡改状态拒绝、同会话与跨会话归档读取、来源注册顺序、辅助用量隔离、规则变更与新目录写前拦截。脚本端点验证实际调用链，不等同于真实供应商联调、摘要语义质量保证、断电耐久性认证或无限长会话性能。
-
-## 2026-09-23 实际验收结果
-
-下面保留初次上下文实现的验收范围，不代表当前全部机制。随后发现的长输出双存储、ManagedRuntime.execute 取消与同批规则过期问题，已按[机制复核](MINIMAL-HARNESS-REVIEW-2026-09-23.zh-CN.md#三个缺陷的修复与验证)修复；最新日志在 `.tmp-verify/three-defects-validation/`，重启场景已覆盖超过 120000 字节的完整输出。开发阶段不再维护旧版兼容；既有迁移支路不构成后续设计要求。
-
-| 范围 | 结果 |
-|---|---|
-| API、Runtime、Compaction、Models、Skills、Tools、Application、HTTP/Tauri Bridge | 215 项通过；已有长任务成本探针保持显式 ignored，不计入通过数 |
-| Spill | 18 项通过，包括保留结构化元数据、正文归档与完整结果预算 |
-| 默认 Server | 26 项单元测试通过；模型管理与共享 Application 的 6 项集成测试通过 |
-| Server `--no-default-features` | 19 项通过；此前 3 个能力测试的编译功能假设已修正，未把不可用能力误报为可启用 |
-| Web 单元与设计系统门禁 | 51 项通过；独立 `check:web:design` 通过 |
-| 隔离真实浏览器 / 真实 Rust shell、read、Spill / 实际进程重启 | 17 项断言通过；整个场景仅 1 次摘要、11 次模型请求，未接真实供应商 |
-
-验收中修复了一个实际组合缺陷：Shell 的少量结构化退出码信息使旧 Spill 跳过了大段文本。现在只归档独立文本正文，退出码/结构化信息、call_id 和状态原样保留；结构化元数据和 ArtifactRef 都占用结果预算。结构化内容本身过大时仍交由硬限制明确拒绝，不伪装为成功截断。
-
-详细证据位于 `.tmp-verify/context-validation/` 和 `.tmp-verify/context-browser-report/result.json`。`components.log`、`server-integration.log`、`server-minimal.log`、`web.log`、`design.log` 为对应最终回归；`server-default.log` 保留了 26 项单元通过以及一个旧模型 JSON 断言尚未加入可选窗口字段时的失败记录，该断言修正后 6 项接口测试已单独重新通过，没有删除历史失败日志或重复运行未变更的单元测试。
-
-未提交或推送 Git，没有停止或重启开发者正在运行的服务。为避免替换被运行进程锁定的 server.exe，服务集成与浏览器验证使用独立 `target/context-validation` 构建目录。
+测试包含：固定模型窗口下主动压缩、同一摘要跨 Run/重启复用、旧格式拒绝、无 Web 的扩展组合、配置工作空间与服务启动目录不同、超过 Core 原始接纳上限的历史档案、篡改状态拒绝、同会话与跨会话归档读取、来源注册顺序、辅助用量隔离、规则变更与新目录写前拦截。脚本端点验证实际调用链，不等同于真实供应商联调、摘要语义质量保证、断电耐久性认证或无限长会话性能。

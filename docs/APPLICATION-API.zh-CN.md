@@ -62,4 +62,6 @@ Rust调用方可以直接构造多模态RunRequest。默认HTTP/Tauri桥接不�
 
 `start_task_with_history(StartRequest, Vec<Message>, metadata)` 是 Rust 可信入口，不是公共 HTTP/Tauri 新请求字段。宿主提供已经验证的正式历史和逻辑上下文身份；Application 使用当前系统提示词、模型和权限配置，将新 prompt 追加为新的 Run。历史 System 消息不覆盖当前宿主指令，历史大小和工具配对仍由 Runtime 校验。
 
-同一 key 的 prompt 或 metadata 变化会冲突；宿主负责确保逻辑 key 对应不可变的历史身份，Application 不为重复比对再复制一份历史。内存 TTL/forget 语义不变。跨重启会话、revision、持久请求去重与文件锁由 `apps/server/sessions` 实现，见[本地会话](LOCAL-SESSIONS.zh-CN.md)。调用会话接口保存的历史不受内存 Run 过期影响，通用 `/v1/runs` 仍明确是临时任务入口。
+同一 key 的 prompt 或 metadata 变化会冲突；宿主负责确保逻辑 key 对应不可变的历史身份，Application 不为重复比对再复制一份历史。内存 TTL/forget 语义不变。跨重启会话、revision、持久请求去重与文件锁由 `sessions` 扩展实现，见[本地会话](LOCAL-SESSIONS.zh-CN.md)。调用会话接口保存的历史不受内存 Run 过期影响，通用 `/v1/runs` 仍明确是临时任务入口。
+
+启用 `application/sessions` 后，`SessionApplication` 连接会话扩展与同一个 AgentApplication。它使用当前配置预留系统消息成本，处理持久请求去重、启动、绑定及失败收尾；HTTP/Tauri 只需调用该接口，不复制会话启动流程。默认 Application 不引入 sessions。独立 Runtime 集成可直接使用 [sessions](../packages/sessions/README.md)，不经过 Application。

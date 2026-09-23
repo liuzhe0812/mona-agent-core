@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+  "packages/sessions", "packages/instructions",
   "packages/api", "packages/runtime", "packages/providers",
   "packages/memory", "packages/planner", "packages/compaction", "packages/spill", "packages/tools", "examples/demo",
   "packages/application", "packages/http-bridge", "packages/tauri-bridge", "apps/server",
@@ -9,6 +10,7 @@ members = [
 
 # Default build excludes both transport bridges and composition examples.
 default-members = [
+  "packages/sessions", "packages/instructions",
   "packages/api", "packages/runtime", "packages/providers", "packages/application",
   "packages/memory", "packages/planner", "packages/compaction", "packages/spill", "packages/tools", "examples/demo"
 ]
@@ -30,6 +32,8 @@ planner = { path = "packages/planner" }
 compaction = { path = "packages/compaction" }
 spill = { path = "packages/spill" }
 tools = { path = "packages/tools" }
+sessions = { path = "packages/sessions" }
+instructions = { path = "packages/instructions" }
 base64 = "0.22"
 async-trait = "0.1.86"
 serde = { version = "1.0.217", features = ["derive", "rc"] }

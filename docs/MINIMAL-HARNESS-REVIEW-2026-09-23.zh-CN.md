@@ -109,7 +109,7 @@ Tauri 接入：桌面宿主 → Tauri Bridge → 同一 Application/Runtime
 
 归档后端对字符串与流只保留 `put_stream` 一套写入实现。固定缓冲验证完整 UTF-8、精确长度和配额，原子发布前不返回引用；取消、编码错误、长度不符与超限不发布不完整记录。临时采集没有索引或公开 URI，退出即清理；无归档或无读取能力时明确省略，不虚构可取回全文。
 
-回归代码：`packages/api/tests/owned_wait.rs`、`packages/models/tests/cancellation.rs`、`packages/runtime/tests/policy_dispatch.rs`、`packages/tools/tests/shell.rs`、`packages/spill/tests/streaming_write.rs`、`apps/server/src/instructions_tests.rs`、`apps/server/src/spill_session_tests.rs`。慢 intent 保存导致的策略过期也有独立测试。
+回归代码：`packages/api/tests/owned_wait.rs`、`packages/models/tests/cancellation.rs`、`packages/runtime/tests/policy_dispatch.rs`、`packages/tools/tests/shell.rs`、`packages/spill/tests/streaming_write.rs`、`packages/instructions/src/tests.rs`、`apps/server/src/spill_session_tests.rs`。慢 intent 保存导致的策略过期也有独立测试。
 
 验证日志在 `.tmp-verify/three-defects-validation/`。`components.log` 覆盖 API、Runtime、Models、Tools、Spill；后续输出边界修正以 `tools-final.log` 为准。`server.log`、`minimal-server.log` 分别覆盖默认与无可选扩展宿主。`browser.log` 及 `.tmp-verify/context-browser-report/result.json` 来自正式 Web、真实 Rust Shell/Read、实际宿主重启；模型是受控本地端点，不是付费供应商或生产认证。
 
@@ -124,6 +124,25 @@ Tauri 接入：桌面宿主 → Tauri Bridge → 同一 Application/Runtime
 已有长任务性能探针保持显式 ignored，未计入通过数。无默认扩展构建仍有未使用变量/方法的编译警告；测试无失败。测试只操作隔离工作区、状态目录及自己创建的进程。
 
 这组修复不承诺跨 Run 的文件事务、任意 Shell 脚本规则分析、永久归档或无限输出；这些边界不通过增加 Core 框架解决。
+
+## 扩展独立复用：E1 / E5
+
+会话实现已迁入 `packages/sessions`，项目规则已迁入 `packages/instructions`，Skills 根选择和本地 Plugin 装配复用现有 `skills` 包。Server 仅保留 session_routes、部署解析与授权；Application 的可选 sessions 适配共享原 Run 注册表。未新增执行循环或存储框架，旧会话格式和迁移分支已删除。
+
+当前接口及独立接入验收入口见 [sessions](../packages/sessions/README.md)、[instructions](../packages/instructions/README.md) 和 [Skills](../packages/skills/README.md)。本报告前述数字是各历史修复的记录，原临时日志已按用户要求清理，不作为这次或之后的验证证据。
+
+| E1/E5 本次最终验收 | 结果 |
+|---|---|
+| sessions / instructions / skills / application 会话装配 | 分别 14 / 4 / 13 / 17 项通过 |
+| sessions 无压缩依赖 / application 无会话依赖 | 分别 13 / 14 项通过，未装配路径保持独立 |
+| api / runtime 共享契约回归 | 143 项通过；原有显式性能探针 1 项 ignored，未计入通过数 |
+| 默认 Server / 无默认扩展 Server | 分别 22 / 9 项通过；单元测试已按归属移至扩展包，不能只用 Server 测试数量比较覆盖 |
+| 正式浏览器上下文 / 会话流程 | 分别 19 / 37 项断言通过，包含真实工具、进程重启、历史续接与跨会话隔离 |
+| Workspace 编译 / normal 依赖边界 / 最终源码哈希 | 通过 |
+
+补充验证了并发重复请求只执行一次、同请求 ID 不同内容拒绝，以及调用者在可靠接纳后断开仍能完成启动与保存；这些检查使用公共接口，不依赖 HTTP。共享契约回归中同步了一条过时的内嵌图片展示断言，保留任意 structured/私有协议数据不进入 UI 的检查，未改动并行任务的渲染实现。
+
+当前证据位于忽略目录 `target/extension-reuse/result.json` 及其列出的 `continuation-*` 日志。浏览器与模型运行在隔离工作空间、状态目录和本地受控端点；不代表真实供应商、原生 Tauri 界面或生产耐久性验收。未提交、推送或重启开发者实际服务。
 
 ## 核心层累计历史与动态工具预算修复
 
@@ -210,4 +229,4 @@ RunEvent 目前主要是步骤、展示项和结果，没有精简的重试等�
 4. 默认长任务精简审计，测量本地检查点/档案成本；完善安全的错误与进度解释。
 5. 在真实任务上评估摘要质量、模型切换和视觉上下文边界。MCP、向量库、强制规划、多Agent、热加载、插件市场、跨设备同步不作为本轮最小性必补项。
 
-已实现范围包括“三个缺陷的修复与验证”和“核心层累计历史与动态工具预算修复”，其余条目仍为评估建议；原始探针与历史验证不能代替当前回归。
+已实现范围包括“三个缺陷的修复与验证”“核心层累计历史与动态工具预算修复”和“扩展独立复用：E1 / E5”，其余条目仍为评估建议；原始探针与历史验证不能代替当前回归。

@@ -135,6 +135,17 @@ impl AgentApplication {
         let mut state = lock(&self.inner.state); self.prune(&mut state);
         state.runs.get(id).cloned().ok_or_else(|| ApplicationError::new(ApplicationErrorCode::NotFound, "run is absent or expired"))
     }
+    #[cfg(feature = "sessions")]
+    pub(crate) fn session_admission_bytes(&self) -> ApplicationResult<usize> {
+        let limits = &self.inner.config.run_limits;
+        let mut bytes = limits.max_initial_history_bytes.min(limits.max_history_bytes);
+        if let Some(system) = &self.inner.config.system_prompt {
+            let cost = serde_json::to_vec(&Message::system(system))
+                .map_err(|_| ApplicationError::new(ApplicationErrorCode::Internal, "cannot size system instructions"))?.len();
+            bytes = bytes.saturating_sub(cost.saturating_add(1));
+        }
+        Ok(bytes)
+    }
     pub fn start_task(&self, request: StartRequest) -> ApplicationResult<StartResponse> {
         self.start_task_with_history(request, Vec::new(), BTreeMap::new())
     }

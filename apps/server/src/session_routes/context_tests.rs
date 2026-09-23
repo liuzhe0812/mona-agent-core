@@ -41,7 +41,7 @@ async fn compacting_service(
     store: Arc<Store>,
     model: Arc<ArchiveModel>,
     request_limit: usize,
-) -> (runtime::Host, Service) {
+) -> (runtime::Host, TestService) {
     let plugin = CompactionPlugin::default();
     store.attach_compactor(plugin.compactor()).unwrap();
     let host = runtime::HostBuilder::new()
@@ -56,16 +56,16 @@ async fn compacting_service(
     config.run_limits.max_context_bytes = request_limit;
     config.run_limits.max_output_tokens = 64;
     let app = AgentApplication::new(
-        crate::sessions::runtime(Arc::new(host.engine()), store.clone()),
+        sessions::runtime(Arc::new(host.engine()), store.clone()),
         config,
     )
     .unwrap();
     (
         host,
-        Service {
+        TestService {
+            tasks: SessionApplication::new(store.clone(), app.clone()),
             store,
             app,
-            starts: Arc::new(Mutex::new(VecDeque::new())),
         },
     )
 }
@@ -122,7 +122,7 @@ async fn summary_survives_new_runs_and_restart_without_rewriting_archive_or_resu
     assert_eq!(doc.history().unwrap()[0].text(), first);
     assert_eq!(doc.history().unwrap().len(), 8);
     assert_eq!(doc.header.version, 2);
-    let view = crate::sessions::view::turn_page(&doc, "first", None, 50).unwrap();
+    let view = crate::session_routes::view::turn_page(&doc, "first", None, 50).unwrap();
     assert_eq!(view.turn.prompt, first);
     service.app.shutdown(Duration::from_secs(3)).await.unwrap();
     host.shutdown().await.unwrap();
@@ -134,7 +134,7 @@ async fn archive_above_core_admission_cap_still_continues_from_verified_bounded_
     let store = Store::open(&base, temp.path()).unwrap();
     let header = store.create("large-archive").unwrap();
     store
-        .prepare(&header.id, header.revision, "old", "archive start")
+        .prepare(&header.id, header.revision, "old", "archive start", RunLimits::default().max_initial_history_bytes)
         .unwrap();
     let mut history = vec![Message::user("archive start")];
     let mut ranges = Vec::new();
@@ -200,12 +200,13 @@ async fn archive_above_core_admission_cap_still_continues_from_verified_bounded_
                 &header.id,
                 revision,
                 "disabled",
-                "cannot admit full archive"
+                "cannot admit full archive",
+                RunLimits::default().max_initial_history_bytes
             )
             .err()
             .unwrap()
             .code,
-        Code::Capacity
+        sessions::SessionErrorCode::Capacity
     );
     assert_eq!(
         std::fs::read(&path).unwrap(),
@@ -240,36 +241,18 @@ async fn archive_above_core_admission_cap_still_continues_from_verified_bounded_
     host.shutdown().await.unwrap();
 }
 #[test]
-fn version_one_records_migrate_on_write_and_corrupt_compaction_never_overwrites_history() {
+fn corrupt_compaction_never_overwrites_current_history() {
     let temp = tempfile::tempdir().unwrap();
     let base = temp.path().join("data");
     let store = Store::open(&base, temp.path()).unwrap();
-    let h = store.create("legacy").unwrap();
-    store.prepare(&h.id, h.revision, "first", "hello").unwrap();
+    let h = store.create("corrupt-summary").unwrap();
+    store.prepare(&h.id, h.revision, "first", "hello", RunLimits::default().max_initial_history_bytes).unwrap();
     let mut cp = checkpoint(&h.id, "first", vec![Message::user("hello")]);
     cp.phase = CheckpointPhase::RunFinished;
     cp.status = Some(RunStatus::Completed);
     store.commit(&cp, &CancellationToken::new()).unwrap();
+    store.attach_compactor(CompactionPlugin::default().compactor()).unwrap();
     let path = file_path(&base, &h.id);
-    let text = std::fs::read_to_string(&path).unwrap();
-    let (head, body) = text.split_once('\n').unwrap();
-    let mut head: serde_json::Value = serde_json::from_str(head).unwrap();
-    head["version"] = json!(1);
-    let mut body: serde_json::Value = serde_json::from_str(body).unwrap();
-    for key in ["archive", "base", "compaction"] {
-        body.as_object_mut().unwrap().remove(key);
-    }
-    std::fs::write(&path, format!("{head}\n{body}\n")).unwrap();
-    drop(store);
-    let store = Store::open(&base, temp.path()).unwrap();
-    let doc = store.get(&h.id).unwrap();
-    assert_eq!(doc.header.version, 1);
-    store
-        .rename(&h.id, doc.header.revision, "migrated")
-        .unwrap();
-    assert_eq!(store.get(&h.id).unwrap().header.version, 2);
-    let plugin = CompactionPlugin::default();
-    store.attach_compactor(plugin.compactor()).unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
     let (head, body) = text.split_once('\n').unwrap();
     let mut body: serde_json::Value = serde_json::from_str(body).unwrap();
@@ -277,8 +260,6 @@ fn version_one_records_migrate_on_write_and_corrupt_compaction_never_overwrites_
     let broken = format!("{head}\n{body}\n");
     std::fs::write(&path, &broken).unwrap();
     let revision = store.get(&h.id).unwrap().header.revision;
-    assert!(store
-        .prepare(&h.id, revision, "next", "must not execute")
-        .is_err());
+    assert!(store.prepare(&h.id, revision, "next", "must not execute", RunLimits::default().max_initial_history_bytes).is_err());
     assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
 }

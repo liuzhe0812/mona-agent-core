@@ -5,8 +5,7 @@ use runtime::HostBuilder;
 use std::{sync::Arc, time::Duration};
 
 mod capabilities;
-mod instructions;
-mod sessions;
+mod session_routes;
 #[cfg(feature = "model-management")]
 mod model_settings;
 #[cfg(feature = "skills")]
@@ -65,15 +64,19 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     #[cfg(feature = "spill")]
     let spill_plugin = spill_host.as_ref().map(spill_setup::SpillHost::plugin);
-    let mut tool_config = tool_setup::from_environment(Vec::new())?;
-    let session_store = sessions::Store::from_environment(&tool_config.cwd, demo)?;
+    let tool_config = tool_setup::from_environment(Vec::new())?;
+    let session_store = session_routes::from_environment(&tool_config.cwd, demo)?;
     #[cfg(feature = "spill")]
-    if let Some(spill_host) = &spill_host {
-        tool_config.read_extensions.push(Arc::new(spill_host.read_extension().with_sessions(session_store.clone())));
-        tool_config.output_archive = Some(Arc::new(spill_setup::SpillOutputArchive::new(
-            spill_plugin.as_ref().expect("spill host owns its plugin").archive(),
-        )));
-    }
+    let tool_config = {
+        let mut tools = tool_config;
+        if let Some(spill_host) = &spill_host {
+            tools.read_extensions.push(Arc::new(spill_host.read_extension().with_sessions(session_store.clone())));
+            tools.output_archive = Some(Arc::new(spill_setup::SpillOutputArchive::new(
+                spill_plugin.as_ref().expect("spill host owns its plugin").archive(),
+            )));
+        }
+        tools
+    };
     let mut builder = HostBuilder::new()
         .checkpoint_sink(Arc::new(sessions::SessionSink(session_store.clone())))?;
     #[cfg(feature = "spill")]
@@ -81,8 +84,14 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         builder = builder.context_transform(Arc::new(sessions::references::SessionReferences::new(session_store.clone())));
     }
     if !demo && capability_manager.active(capabilities::INSTRUCTIONS) {
-        let instructions = Arc::new(instructions::ProjectInstructions::new(&tool_config.cwd, Some(session_store.clone()))?);
-        builder = builder.context_transform(instructions.clone()).policy(instructions);
+        let store = session_store.clone();
+        let rules = instructions::ProjectInstructions::new(&tool_config.cwd)?.with_history(Arc::new(
+            move |ctx: &RunContext| match ctx.metadata.get(sessions::SESSION_KEY) {
+                Some(id) => store.source_history(id).map_err(|_| AgentError::new(ErrorCode::Checkpoint, "saved instruction scopes could not be loaded")),
+                None => Ok(Vec::new()),
+            },
+        ));
+        builder = builder.plugin(Arc::new(rules.plugin()));
     }
     for tool in tools::core_tools(&tool_config) {
         builder = builder.tool(tool);
@@ -108,7 +117,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(feature = "skills")]
     if !demo && capability_manager.active("skills") {
-        if let Some(plugin) = skill_setup::from_environment()? {
+        if let Some(plugin) = skill_setup::from_environment(&tool_config.cwd)? {
             builder = builder.plugin(Arc::new(plugin));
         }
     }
@@ -172,7 +181,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         config.allowed_origins.push(origin);
     }
     let router = http_bridge::router(application.clone(), config)?;
-    let router = router.merge(sessions::router(
+    let router = router.merge(session_routes::router(
         session_store, application.clone(), token.clone(),
         std::env::var("AGENT_UI_ORIGIN").ok(),
     )?);

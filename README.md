@@ -1,12 +1,12 @@
 # Mona Agent Harness v0.3.0
 
-**最小执行底座 + 面向不同生产场景的可复用 Agent 扩展能力 + Web 产品。**
+**核心层 + 扩展层 + 产品层（Web）：最小执行底座、可复用 Agent 能力和 Web 产品。**
 
 组件负责能力，公共接口定义边界，宿主负责组合。普通 API 与薄 Plugin 入口可以并存；Plugin 是组件接入运行时的一种方式，不要求所有组件都插件化。
 
 底座提供唯一默认执行循环及可靠执行约束；模型、工具、上下文和存储等能力按场景装配；Web 提供实际可用的交互与配置。编程、运维、办公是使用场景，不是额外架构层。当前仍为 Demo 开发阶段，不维护旧版接口、配置或文件格式兼容。
 
-当前 Rust 插件 API 为 7，UI 流式协议为 2。Server 当前默认的四工具组合不构成通用底座的必选工具集；各宿主按需要装配。
+当前 Rust 公共契约见 [api](packages/api/README.md)，UI 流式协议为 2。Server 当前默认的四工具组合不构成通用底座的必选工具集；各宿主按需要装配。
 
 ## 交付状态
 
@@ -43,6 +43,8 @@
 | `packages/providers` | HTTP/SSE 模型适配器 | 使用真实模型时装配 |
 | `packages/models` | 模型配置、目录、默认选择与路由 | 可选；需要管理页面时装配 |
 | `packages/tools` | `read/shell/edit/write` 及可选 `grep/find/ls` | 正式 Server 固定四工具，可选增加三个检索工具 |
+| `packages/sessions` | 持久会话、可靠保存、工作集恢复和归档归属 | 不依赖 Web/Application/具体 Runtime，宿主提供目录和授权 |
+| `packages/instructions` | 规则发现、来源注入与派发前变更检查 | 普通接口与薄 Plugin；完整历史读取可注入 |
 | `packages/skills` | 技能发现与摘要目录，通过 `read` 渐进加载 | 独立组件；发行版包含但 Web 默认关闭 |
 | `packages/compaction` | 请求接近预算时摘要较早的已结算历史 | 独立组件；正式 Web 默认装配，短任务不调用摘要 |
 | `packages/spill` | 长文本结果和流式命令输出共用归档、配额与读取接口 | 正式 Web 默认装配，通过 `read` 和宿主会话授权取回 |
@@ -131,9 +133,9 @@ node --test packages/client/test/*.test.mjs
 
 正式通用 Web UI 的本地开发入口是 `npm run dev:web`；它自动生成本机 Bridge Token 和设置存储密钥，无需 `.env`。首次模型供应商在设置页配置。
 
-正式 Web 现在默认提供[本地会话保存](docs/LOCAL-SESSIONS.zh-CN.md)：历史按工作空间存入用户目录，可在重启后查看并继续对话，支持名称搜索、重命名和删除。异常退出恢复确认过的记录并标识中断，不自动重跑工具。持久化属于 `apps/server`，不强制嵌入式 Runtime 落盘。
+正式 Web 现在默认提供[本地会话保存](docs/LOCAL-SESSIONS.zh-CN.md)：历史按工作空间存入用户目录，可在重启后查看并继续对话，支持名称搜索、重命名和删除。异常退出恢复确认过的记录并标识中断，不自动重跑工具。持久化由独立的 `sessions` 扩展实现，Server 仅提供路由和装配；不强制嵌入式 Runtime 落盘。
 
-[上下文管理](docs/CONTEXT-MANAGEMENT.zh-CN.md)已区分完整档案与模型工作集：摘要跨轮次和重启复用，模型窗口可在设置页逐模型填写，Skills/项目规则先计入预算，同会话历史 Spill 引用经过归属验证后可读取。项目规则是可关闭的宿主能力，不增加万能 `context` 包。
+[上下文管理](docs/CONTEXT-MANAGEMENT.zh-CN.md)已区分完整档案与模型工作集：摘要跨轮次和重启复用，模型窗口可在设置页逐模型填写，Skills/项目规则先计入预算，同会话历史 Spill 引用经过归属验证后可读取。项目规则由可关闭的 `instructions` 扩展提供，Skills 根按配置的工作空间装配；不增加万能 `context` 包。
 
 `cargo run -p server -- --demo` 使用明确标记的离线脚本模型演示逐字输出；它不是实际 LLM，也不注册演示工具。去掉 `--demo` 时配置 `AGENT_MODEL_ENDPOINT`、`AGENT_MODEL_NAME`、`AGENT_MODEL_KEY`。`.env.example` 仅作为说明，不会自动加载。
 
@@ -149,7 +151,7 @@ node --test packages/client/test/*.test.mjs
 - [可等待检查点](docs/CHECKPOINTS.zh-CN.md)
 - [v0.2 → v0.3 迁移](docs/MIGRATION-0.3.zh-CN.md)
 - [Rust Plugin API 6 迁移](docs/MIGRATION-API-6.zh-CN.md)
-- [Rust Plugin API 7 与上下文存储迁移](docs/MIGRATION-API-7.zh-CN.md)
+- [会话扩展独立接入](packages/sessions/README.md) · [规则扩展独立接入](packages/instructions/README.md)
 - [公共流式协议与 Codex 借鉴边界](docs/STREAMING-PROTOCOL.zh-CN.md)
 - [统一应用接口](docs/APPLICATION-API.zh-CN.md)
 - [本地会话与重启恢复](docs/LOCAL-SESSIONS.zh-CN.md)
