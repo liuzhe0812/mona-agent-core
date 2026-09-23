@@ -108,6 +108,7 @@ def check_package() -> dict:
         "http-bridge": {"api", "application"},
         "tauri-plugin-bridge": {"api", "application"},
         "models": {"api", "providers"},
+        "skills": {"api"},
     }
     problems = []
     for name, permitted in allowed.items():

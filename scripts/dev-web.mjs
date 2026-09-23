@@ -141,6 +141,9 @@ export function resolveDevConfig(env = process.env) {
     modelManagement,
     stateDirectory,
     modelSettingsPath: resolve(env.AGENT_MODEL_SETTINGS_PATH?.trim() || resolve(stateDirectory, 'model-settings.enc')),
+    capabilityStatePath: resolve(env.AGENT_CAPABILITY_STATE_PATH?.trim() || resolve(stateDirectory, 'capabilities.json')),
+    spillDirectory: resolve(env.AGENT_SPILL_DIR?.trim() || resolve(stateDirectory, 'spill')),
+    sessionsDirectory: resolve(env.AGENT_SESSIONS_DIR?.trim() || resolve(stateDirectory, 'sessions')),
   };
 }
 
@@ -350,6 +353,9 @@ export async function main() {
     AGENT_SERVER_TOKEN: config.token,
     AGENT_SERVER_ADDR: config.serverAddress,
     AGENT_UI_ORIGIN: config.uiOrigin,
+    AGENT_CAPABILITY_STATE_PATH: config.capabilityStatePath,
+    AGENT_SPILL_DIR: config.spillDirectory,
+    AGENT_SESSIONS_DIR: config.sessionsDirectory,
   };
   if (config.modelManagement) {
     childEnv.AGENT_MODEL_STORE_KEY = process.env.AGENT_MODEL_STORE_KEY?.trim()

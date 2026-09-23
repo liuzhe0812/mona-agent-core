@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ModelSettingsClient } from './model-settings.mjs';
+import { ModelSettingsClient, parseContextWindow } from './model-settings.mjs';
+
+test('model capacity accepts unknown or positive bounded integers without guessing', () => {
+  assert.equal(parseContextWindow(''), null); assert.equal(parseContextWindow(null), null);
+  assert.equal(parseContextWindow(' 32768 '), 32768);
+  for (const value of ['0', '-1', '1.5', 'Infinity', '8192 tokens', '1000000001']) assert.throws(() => parseContextWindow(value));
+});
 
 test('management requests use bearer headers without cookies or redirects', async () => {
   const previous = globalThis.fetch;

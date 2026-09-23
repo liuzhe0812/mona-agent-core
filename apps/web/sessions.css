@@ -1,0 +1,74 @@
+/* Local task navigation. Consumes the shared design system; it never invents type, radii or color. */
+.sessions-region { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--ui-space-1-5); padding: 0 var(--ui-space-0_5); }
+.sessions-heading { display: flex; align-items: center; gap: var(--ui-space-1-5); margin: var(--ui-space-3) var(--ui-space-1-5) 0; color: var(--text-secondary); }
+.sessions-label { display: inline-flex; align-items: center; gap: var(--ui-space-1); min-height: var(--ui-control-sm); padding: 0 var(--ui-space-1-5); border: 0; border-radius: var(--ui-radius-inner); background: transparent; color: var(--text-secondary); font-size: var(--ui-text-12); }
+.sessions-label:hover { background: var(--surface-hover); color: var(--text-primary); }
+.sessions-label .chevron-icon { width: var(--ui-text-13); height: var(--ui-text-13); transition: transform var(--motion-hover) var(--motion-ease-out); }
+.sessions-label[aria-expanded='false'] .chevron-icon { transform: rotate(-90deg); }
+/* The section actions stay out of the way until the pointer or the keyboard reaches the header. */
+.sessions-heading-actions { margin-left: auto; display: flex; align-items: center; gap: var(--ui-space-0_5); opacity: 0; transition: opacity var(--motion-hover) var(--motion-ease-out); }
+.sessions-heading:hover .sessions-heading-actions, .sessions-heading:focus-within .sessions-heading-actions { opacity: 1; }
+.sessions-heading .icon-button { width: var(--ui-icon-sm); height: var(--ui-icon-sm); }
+.sessions-heading .icon-button .line-icon { width: var(--ui-text-15); height: var(--ui-text-15); }
+.sessions-region.is-collapsed .sessions-list,
+.sessions-region.is-collapsed .sessions-notice,
+.sessions-region.is-collapsed #sessions-more { display: none; }
+.sessions-list { flex: 1; min-height: 70px; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
+.session-item { position: relative; }
+/* One right-hand box holds both the stamp and the row actions: they overlap exactly, so switching
+   between them never moves anything and the title can never run under the icons. */
+.session-row { width: 100%; min-height: var(--ui-control-sm); display: flex; align-items: center; gap: var(--ui-space-2); padding: var(--ui-space-1) var(--ui-space-2-5); border: 0; border-radius: var(--ui-radius-inner); background: transparent; color: var(--text-primary); text-align: left; font-size: var(--ui-text-13); }
+.session-row:hover, .session-row.active { background: var(--surface-hover); }
+/* Every row reserves the glyph slot; only a running task paints the spinner, so the title keeps
+   its place (and the indent) when the task settles. The animation is never restarted by a refresh. */
+.session-glyph { flex: 0 0 auto; width: var(--ui-text-14); height: var(--ui-text-14); display: inline-grid; place-items: center; }
+.session-spinner {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--ui-radius-round);
+  color: var(--text-secondary);
+  background: repeating-conic-gradient(currentColor 0deg 14deg, transparent 14deg 45deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--ui-border) * 3), var(--text-primary) 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - var(--ui-border) * 3), var(--text-primary) 0);
+  visibility: hidden;
+  animation: session-spin var(--motion-spinner-cycle) steps(8, end) infinite;
+}
+.session-item.is-running .session-spinner { visibility: visible; }
+/* The glyph slot also carries the unread dot; the spinner wins while a task runs. */
+.session-unread { width: var(--ui-status-dot-size); height: var(--ui-status-dot-size); border-radius: var(--ui-radius-round); background: var(--accent-bg); visibility: hidden; }
+.session-item.is-unread .session-unread { visibility: visible; }
+.session-item.is-unread.is-running .session-unread { visibility: hidden; }
+@keyframes session-spin { to { transform: rotate(360deg); } }
+.session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-meta { flex: 0 0 auto; min-width: calc(var(--ui-icon-sm) * 2 + var(--ui-space-0_5)); text-align: right; color: var(--text-secondary); font-size: var(--ui-text-11); }
+.session-meta.is-failed { color: var(--status-danger); }
+/* The row actions take the stamp's place instead of widening the row. */
+.session-item:hover .session-meta, .session-item:focus-within .session-meta { visibility: hidden; }
+.session-actions { position: absolute; right: var(--ui-space-2-5); top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: var(--ui-space-0_5); }
+.session-action { width: var(--ui-icon-sm); height: var(--ui-icon-sm); display: inline-grid; place-items: center; border: 0; border-radius: var(--ui-radius-inner); background: transparent; color: var(--text-secondary); opacity: 0; pointer-events: none; }
+.session-action .line-icon { width: var(--ui-text-15); height: var(--ui-text-15); }
+/* The pushpin is tilted so it reads like the reference icon instead of a straight tack. */
+.action-pin .line-icon { transform: rotate(-45deg); }
+.session-item:hover .session-action, .session-item:focus-within .session-action { opacity: 1; pointer-events: auto; }
+.session-action:hover { background: var(--surface-selected); color: var(--text-primary); }
+.session-menu { position: fixed; z-index: 40; min-width: 168px; padding: var(--ui-space-1); border: var(--ui-border) solid var(--border-default); border-radius: var(--ui-radius-container); background: var(--surface-elevated); box-shadow: none; }
+.session-menu-item { width: 100%; min-height: var(--ui-control-md); display: flex; align-items: center; gap: var(--ui-space-2-5); padding: 0 var(--ui-space-2-5); border: 0; border-radius: var(--ui-radius-inner); background: transparent; color: var(--text-primary); text-align: left; font-size: var(--ui-text-13); }
+.session-menu-item .line-icon { width: var(--ui-text-16); height: var(--ui-text-16); color: var(--text-secondary); }
+.session-menu-item.is-danger .line-icon { color: var(--status-danger); }
+.session-menu-item:hover, .session-menu-item:focus-visible { background: var(--surface-hover); }
+.session-menu-item.is-danger { color: var(--status-danger); }
+.sessions-notice { margin: 0 var(--ui-space-2) var(--ui-space-1); max-height: 120px; overflow: auto; color: var(--text-secondary); font-size: var(--ui-text-11); line-height: var(--ui-line-body); overflow-wrap: anywhere; }
+.sessions-notice.error { color: var(--status-danger); }
+.session-empty { padding: var(--ui-space-2) var(--ui-space-2-5); color: var(--text-secondary); font-size: var(--ui-text-12); line-height: var(--ui-line-body); }
+.history-pagination, .history-tools-nav { display: flex; flex-wrap: wrap; gap: var(--ui-space-3); margin: var(--ui-space-3) 0; }
+/* The spinner carries the running state, so it keeps turning even when the system asks for less
+   motion; the stepwise rotation is already the discreet form. */
+@media (max-width: 680px) {
+  .topbar { gap: var(--ui-space-1); padding: 0 var(--ui-space-1-5); }
+  .top-actions { gap: var(--ui-space-0_5); }
+  #session-rename, #session-delete { padding: 0 var(--ui-space-1); font-size: var(--ui-text-11); }
+  .thread-heading { gap: var(--ui-space-1); }
+  #thread-title { max-width: 72px; }
+  .top-actions .connection { max-width: 90px; }
+  #connection-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

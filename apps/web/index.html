@@ -6,34 +6,47 @@
   <meta name="referrer" content="no-referrer">
   <base href="/apps/web/">
   <title>Mona Agent</title>
+  <script type="module" src="/apps/web/theme.mjs" blocking="render"></script>
   <link rel="stylesheet" href="/apps/web/styles.css">
+  <link rel="stylesheet" href="/apps/web/sessions.css">
+  <link rel="stylesheet" href="/apps/web/appearance.css">
 </head>
 <body>
   <div class="shell">
-    <aside id="chat-sidebar" class="sidebar" aria-label="工作空间导航">
-      <div class="brand"><span class="brand-mark">M</span><div><strong>Mona</strong><small>AGENT WORKSPACE</small></div></div>
-      <button id="new-chat" class="nav primary" type="button"><span>＋</span>新对话</button>
-      <button class="nav active" type="button"><span>◫</span>当前会话</button>
-      <div class="section-label">项目</div>
-      <div class="project"><span class="project-dot"></span><div><strong>默认工作空间</strong><small>本地 UI 标签，不代表文件权限</small></div></div>
-      <div class="sidebar-spacer"></div>
-      <button id="settings-button" class="nav sidebar-settings" type="button"><span>⚙</span>设置</button>
-      <div class="sidebar-foot"><span class="avatar">M</span><div><strong>本地开发</strong><small>Core 与 UI 解耦</small></div></div>
+    <aside id="chat-sidebar" class="sidebar" aria-label="任务导航">
+      <div class="brand"><span class="brand-mark">M</span><strong>Mona</strong><button id="search-button" class="icon-button" type="button" aria-label="搜索任务" aria-keyshortcuts="Control+K" aria-haspopup="dialog" aria-expanded="false"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg></button></div>
+      <button id="new-chat" class="nav" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a9 9 0 0 1-9 9H4l-2 2v-11a9 9 0 0 1 19 0ZM8 11h8m-4-4v8"/></svg>新建任务<kbd>Ctrl N</kbd></button>
+      <div class="sessions-region">
+        <div class="sessions-heading">
+          <button id="sessions-collapse" class="sessions-label" type="button" aria-expanded="true" aria-controls="sessions-list"><span>任务</span><svg class="line-icon chevron-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+          <div class="sessions-heading-actions">
+            <button id="sessions-options" class="icon-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="sessions-options-menu" aria-label="任务列表操作" data-tooltip="任务列表操作"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg></button>
+            <button id="sessions-new" class="icon-button" type="button" aria-label="新建任务" data-tooltip="新建任务"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11.5 4.5h8v15h-15v-15h4"/><path d="M15.5 3.5 20 8l-8.5 8.5H7v-4.5z"/></svg></button>
+          </div>
+        </div>
+        <div id="sessions-list" class="sessions-list" aria-label="本地任务记录"></div>
+        <button id="sessions-more" class="text-button" type="button" hidden>加载更多</button>
+        <p id="sessions-notice" class="sessions-notice" role="status" aria-live="polite"></p>
+      </div>
+      <div class="sidebar-foot"><button id="settings-button" class="nav" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3-1 3-3 1-2 3 2 2v3l3 1 1 3h4l1-3 3-1 2-3-2-2V8l-3-1-1-4Z"/><circle cx="10" cy="11" r="3"/></svg>设置</button></div>
     </aside>
+    <div id="sidebar-resizer" class="sidebar-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="chat-sidebar" aria-label="调整侧栏宽度"></div>
+    <button id="sidebar-scrim" class="sidebar-scrim" type="button" aria-label="关闭侧栏" hidden></button>
 
     <section id="chat-workspace" class="workspace">
       <header class="topbar">
-        <div><span class="muted">默认工作空间</span><span class="slash">/</span><strong id="thread-title">新对话</strong></div>
-        <div class="top-actions">
-          <button id="theme-toggle" class="icon-button" type="button" aria-label="切换主题">◐</button>
-          <button id="connection-button" class="connection" type="button"><span id="status-dot" class="status-dot"></span><span id="connection-label">未连接</span></button>
-        </div>
+        <div class="thread-heading"><button id="sidebar-toggle" class="icon-button" type="button" aria-label="切换侧栏" aria-controls="chat-sidebar" aria-expanded="true"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button><strong id="thread-title">新任务</strong></div>
       </header>
 
+      <nav id="conversation-rail" class="conversation-rail" aria-label="会话轮次导航" hidden>
+        <div class="conversation-rail-marks"></div>
+        <aside class="conversation-rail-preview" aria-live="polite" hidden>
+          <strong class="conversation-rail-preview-title"></strong>
+          <p class="conversation-rail-preview-text"></p>
+        </aside>
+      </nav>
       <main id="main" class="main">
         <section id="welcome" class="welcome">
-          <div class="hero-mark">M</div>
-          <p class="eyebrow">A LITTLE CLARITY. A LOT OF POSSIBILITY.</p>
           <h1>我们要一起完成什么？</h1>
           <p>从一个想法开始，把下一步交给 Mona。</p>
           <div class="suggestions">
@@ -47,16 +60,16 @@
 
       <footer class="composer-wrap">
         <div class="composer">
-          <textarea id="prompt" rows="3" placeholder="描述你希望完成的任务。Shift + Enter 换行。"></textarea>
+          <textarea id="prompt" rows="3" aria-label="任务内容" placeholder="描述你希望完成的任务…"></textarea>
           <div class="composer-row">
-            <div class="composer-meta"><button id="model-button" type="button"><span id="model-label">选择模型</span><span aria-hidden="true">⌄</span></button><span>工具调用受 Core 权限控制</span></div>
             <div class="composer-actions">
+              <button id="model-button" type="button"><span id="model-label">选择模型</span><span aria-hidden="true">⌄</span></button>
               <button id="cancel" class="secondary" type="button" hidden>停止</button>
               <button id="send" class="send" type="button" aria-label="发送任务">↑</button>
             </div>
           </div>
         </div>
-        <p class="hint">Mona 可能会出错。涉及外部副作用时请检查工具状态与最终结果。</p>
+        <p class="hint">Enter 发送 · Shift + Enter 换行</p>
       </footer>
     </section>
 
@@ -65,10 +78,29 @@
         <button id="settings-back" class="settings-back" type="button"><span aria-hidden="true">‹</span> 返回对话</button>
         <h1>设置</h1>
         <nav aria-label="设置分类">
-          <button class="active" type="button" aria-current="page"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4"/></svg>模型设置</button>
+          <button id="settings-components-tab" class="active" type="button" aria-current="page"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9Z"/><path d="m8 10 4 2 4-2M12 12v5"/></svg>Agent 组件</button>
+          <button id="settings-tools-tab" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5-5L7 4l3 3 2.7-2.7a4 4 0 0 0 5 5L9 18a2.1 2.1 0 0 1-3 0 2.1 2.1 0 0 1 0-3Z"/></svg>Agent 工具</button>
+          <button id="settings-models-tab" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4"/></svg>模型设置</button>
+          <button id="settings-appearance-tab" type="button" aria-controls="appearance-settings-section"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-3.7 1.5 1.5 0 0 1 1-2.6h2a4 4 0 0 0 4-4A8.5 8.5 0 0 0 12 3Z"/><circle cx="7" cy="10" r=".7"/><circle cx="11" cy="7" r=".7"/><circle cx="16" cy="8" r=".7"/></svg>外观</button>
         </nav>
       </aside>
-      <main class="settings-content">
+      <main id="component-settings-section" class="settings-content">
+        <header class="settings-heading">
+          <div><h2>Agent 组件</h2></div>
+          <button id="components-refresh" class="text-button" type="button">刷新</button>
+        </header>
+        <p id="components-notice" class="settings-notice" role="status" aria-live="polite"></p>
+        <div id="component-list" class="capability-list"></div>
+      </main>
+      <main id="tool-settings-section" class="settings-content" hidden>
+        <header class="settings-heading">
+          <div><h2>Agent 工具</h2></div>
+          <button id="tools-refresh" class="text-button" type="button">刷新</button>
+        </header>
+        <p id="tools-notice" class="settings-notice" role="status" aria-live="polite"></p>
+        <div id="tool-list" class="capability-list"></div>
+      </main>
+      <main id="model-settings-section" class="settings-content" hidden>
         <header class="settings-heading">
           <div><h2>模型供应商</h2><p>管理 OpenAI 兼容模型来源和新任务使用的默认模型</p></div>
           <button id="settings-refresh" class="text-button" type="button">刷新</button>
@@ -97,12 +129,74 @@
           </section>
         </div>
       </main>
+      <main id="appearance-settings-section" class="settings-content appearance-settings" aria-label="外观设置" hidden>
+        <header class="settings-heading">
+          <div><h2>外观</h2><p>选择适合你的色彩与阅读方式。</p></div>
+          <button id="theme-reset" class="text-button" type="button">恢复默认</button>
+        </header>
+        <p id="theme-notice" class="settings-notice" role="status" aria-live="polite" tabindex="-1"></p>
+        <div class="appearance-layout">
+          <div class="appearance-options">
+            <fieldset class="appearance-group">
+              <legend>显示模式</legend>
+              <div id="theme-modes" class="theme-modes"></div>
+              <p id="theme-mode-description" class="appearance-help"></p>
+            </fieldset>
+            <fieldset class="appearance-group">
+              <legend>皮肤</legend>
+              <div id="theme-skins" class="theme-skins"></div>
+            </fieldset>
+            <div class="appearance-row"><label for="theme-font-size">消息字号</label><select id="theme-font-size"></select></div>
+            <div class="appearance-row"><label for="theme-shape">面板圆角</label><select id="theme-shape"></select></div>
+            <section class="theme-transfer" aria-label="皮肤文件">
+              <div class="theme-transfer-actions"><button id="theme-import" class="secondary" type="button">导入皮肤</button><button id="theme-export" class="secondary" type="button">导出当前皮肤</button></div>
+              <input id="theme-file" type="file" accept=".json,application/json" hidden>
+              <p class="appearance-help">支持 Mona 皮肤 JSON（最多 32 KiB）。可先导出一套皮肤再编辑配色；导入会替换上次的自定义皮肤，不加载脚本、CSS 或外部图片。</p>
+            </section>
+          </div>
+          <aside class="appearance-preview-wrap" aria-label="样式预览">
+            <div class="appearance-preview-heading"><strong>样式预览</strong><span id="theme-current"></span></div>
+            <div id="theme-preview" class="theme-preview">
+              <div class="theme-preview-header"><strong>Mona</strong><span>你的工作空间</span></div>
+              <div class="theme-preview-body">
+                <p class="theme-preview-user">让每一次专注，都舒适一点。</p>
+                <strong>从一个想法开始</strong>
+                <p>合适的色彩与留白，让内容成为主角。</p>
+                <code class="theme-preview-code">const idea = 'Hello, Mona';</code>
+                <div class="theme-preview-states"><span class="success">● 成功状态</span><span class="danger">● 错误状态</span></div>
+              </div>
+              <div class="theme-preview-composer"><span>描述你希望完成的任务…</span><span class="theme-preview-send" aria-hidden="true">↑</span></div>
+            </div>
+            <p class="appearance-help">仅用于预览文字、气泡与控件，不会创建会话或发送任务。</p>
+          </aside>
+        </div>
+      </main>
     </section>
   </div>
 
+  <div id="session-menu" class="session-menu" role="menu" aria-label="任务操作" hidden></div>
+  <div id="sessions-options-menu" class="session-menu" role="menu" aria-label="任务列表操作" hidden>
+    <button id="sessions-refresh" class="session-menu-item" type="button" role="menuitem">刷新列表</button>
+    <button id="sessions-archived" class="session-menu-item" type="button" role="menuitem" aria-pressed="false">显示已归档任务</button>
+  </div>
+
+  <dialog id="search-dialog" class="search-dialog" aria-label="搜索任务">
+    <div class="search-box"><svg class="line-icon search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg><input id="sessions-search" type="search" placeholder="搜索任务" aria-label="搜索任务" maxlength="80" autocomplete="off"></div>
+    <div class="search-body">
+      <p class="search-group">任务</p>
+      <div id="search-results" class="search-results"></div>
+      <p class="search-group">快捷操作</p>
+      <div class="search-actions">
+        <button id="search-new" class="search-result" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a9 9 0 0 1-9 9H4l-2 2v-11a9 9 0 0 1 19 0ZM8 11h8m-4-4v8"/></svg><span>新建任务</span><kbd>Ctrl+N</kbd></button>
+        <button id="search-settings" class="search-result" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3-1 3-3 1-2 3 2 2v3l3 1 1 3h4l1-3 3-1 2-3-2-2V8l-3-1-1-4Z"/><circle cx="10" cy="11" r="3"/></svg><span>打开设置</span></button>
+        <button id="search-refresh" class="search-result" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg><span>刷新任务列表</span></button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="provider-dialog">
     <form method="dialog" id="provider-form">
-      <div class="dialog-head"><div><p class="eyebrow">MODEL PROVIDER</p><h2 id="provider-dialog-title">添加供应商</h2></div><button value="cancel" class="icon-button" type="button" aria-label="关闭">×</button></div>
+      <div class="dialog-head"><div><p class="eyebrow">MODEL PROVIDER</p><h2 id="provider-dialog-title">添加供应商</h2></div></div>
       <p class="dialog-copy">仅支持 OpenAI 兼容接口。留空 API Key 会保留原凭据，勾选清除才会删除。</p>
       <label>供应商名称<input id="provider-name-input" type="text" maxlength="80" autocomplete="off" required></label>
       <label>API Base<input id="provider-api-base-input" type="url" maxlength="2048" placeholder="https://api.example.com/v1" autocomplete="off" required></label>
@@ -116,9 +210,11 @@
 
   <dialog id="model-dialog">
     <form method="dialog" id="model-form">
-      <div class="dialog-head"><div><p class="eyebrow">MODEL</p><h2>添加模型</h2></div><button value="cancel" class="icon-button" type="button" aria-label="关闭">×</button></div>
+      <div class="dialog-head"><div><p class="eyebrow">MODEL</p><h2>添加模型</h2></div></div>
       <p class="dialog-copy">输入供应商返回的模型 ID；保存后可在列表中控制显示和默认模型。</p>
       <label>模型 ID<input id="model-id-input" type="text" maxlength="512" autocomplete="off" required></label>
+      <label>上下文窗口（tokens，可选）<input id="model-context-tokens" type="number" min="1" max="1000000000" step="1" inputmode="numeric" placeholder="未知时留空，不会猜测模型容量"></label>
+      <p class="dialog-copy">填写此供应商实际部署的模型窗口；系统会预留输出空间。留空继续使用字节预算保护。</p>
       <p id="model-form-error" class="error" role="alert"></p>
       <div class="dialog-actions"><button value="cancel" class="secondary" type="button">取消</button><button id="model-save" value="default" class="primary" type="submit">添加</button></div>
     </form>
@@ -126,7 +222,7 @@
 
   <dialog id="model-picker-dialog">
     <form method="dialog" id="model-picker-form">
-      <div class="dialog-head"><div><p class="eyebrow">COMPOSER MODEL</p><h2>选择模型</h2></div><button value="cancel" class="icon-button" type="button" aria-label="关闭">×</button></div>
+      <div class="dialog-head"><div><p class="eyebrow">COMPOSER MODEL</p><h2>选择模型</h2></div></div>
       <p class="dialog-copy">选择后会设置默认模型，并用于之后的新任务。</p>
       <div id="model-picker-list" class="model-picker-list"></div>
       <p id="model-picker-error" class="error" role="alert"></p>
@@ -136,7 +232,7 @@
 
   <dialog id="connection-dialog">
     <form method="dialog" id="connection-form">
-      <div class="dialog-head"><div><p class="eyebrow">CONNECTION</p><h2>连接 Agent Runtime</h2></div><button value="cancel" class="icon-button" aria-label="关闭">×</button></div>
+      <div class="dialog-head"><div><p class="eyebrow">CONNECTION</p><h2>连接 Agent Runtime</h2></div></div>
       <p class="dialog-copy">浏览器通过 HTTP/SSE Bridge 连接；本地 Tauri 可以注入 Command/Channel。已保存的模型密钥不会返回浏览器。</p>
       <label>连接方式<select id="transport"><option value="http">HTTP Bridge</option><option value="tauri">Tauri Bridge</option></select></label>
       <div id="http-fields">

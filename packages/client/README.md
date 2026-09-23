@@ -38,10 +38,10 @@ Tauri 用 `new TauriAgentClient({invoke, Channel})` 替换 client 创建即可�
 - RunView 不会自动执行工具、请求模型、保存会话或修改工作区。
 - Tauri客户端默认120秒无事件报失联，可按业务调整 streamIdleTimeoutMs；桥接默认30秒无ACK丢弃订阅。
 - HTTP读取器默认单帧上限128 MiB，允许较大恢复快照；可按部署降低maxEventBytes。并非每次都会分配该上限，但超大UI数据仍需要业务治理。
-- UI预览有裁剪与项淘汰，检查各truncated字段和pruned_items；完整归档不是本客户端功能。
+- UI预览有裁剪与项淘汰，检查各truncated字段和pruned_items；完整归档不是本客户端功能。已淘汰项的中间增量可以不展示，后续权威完成事件仍可带完整结果和details重新进入有界缓存；优先淘汰已结束项。执行状态由Runtime维护，不依赖客户端是否保留该项。
 
 ## 测试
 
-`node --test test/*.test.mjs`。测试覆盖共同reducer、SSE解码、HTTP适配、Tauri适配/ACK竞态；HTTP/Tauri测试使用受控mock，不等同于Rust后端联调。
+`node --test test/*.test.mjs`。测试覆盖共同reducer、淘汰后的终态归并与快照恢复、SSE解码、HTTP适配、Tauri适配/ACK竞态；HTTP/Tauri测试使用受控mock，不等同于Rust后端联调。
 
 开发环境安装TypeScript 5.8+后：`tsc -p tsconfig.json`。示例类型检查不包含你的React/Vue/Tauri完整应用构建。

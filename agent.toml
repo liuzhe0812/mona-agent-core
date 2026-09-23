@@ -1,0 +1,45 @@
+version = 1
+
+[capabilities.model-management]
+enabled = true
+user_configurable = false
+
+[capabilities.skills]
+enabled = false
+user_configurable = true
+
+[capabilities.compaction]
+enabled = true
+user_configurable = true
+
+[capabilities.spill]
+enabled = true
+user_configurable = true
+
+[capabilities.read]
+enabled = true
+user_configurable = false
+
+[capabilities.shell]
+enabled = true
+user_configurable = false
+
+[capabilities.edit]
+enabled = true
+user_configurable = false
+
+[capabilities.write]
+enabled = true
+user_configurable = false
+
+[capabilities.grep]
+enabled = false
+user_configurable = true
+
+[capabilities.find]
+enabled = false
+user_configurable = true
+
+[capabilities.ls]
+enabled = false
+user_configurable = true

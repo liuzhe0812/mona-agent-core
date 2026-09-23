@@ -1,9 +1,5 @@
 //! Host-owned management HTTP surface. The generic task bridges remain unchanged.
 use api::{AgentError, ErrorCode};
-use models::{
-    DiscoverRequest, EncryptedFileStore, ModelEntry, ModelManager, Selection, SettingsView,
-    UpsertProvider,
-};
 use axum::{
     extract::{rejection::JsonRejection, DefaultBodyLimit, Request, State},
     http::{header, HeaderValue, Method, StatusCode},
@@ -11,6 +7,10 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
+};
+use models::{
+    DiscoverRequest, EncryptedFileStore, ModelEntry, ModelManager, Selection, SettingsView,
+    UpsertProvider,
 };
 use serde::Deserialize;
 use std::{path::PathBuf, sync::Arc};
@@ -42,12 +42,19 @@ pub fn from_environment() -> Result<ModelManager, Box<dyn std::error::Error>> {
         std::env::var("AGENT_ALLOW_HTTP_LOOPBACK").as_deref() == Ok("1"),
     )?;
     if manager.view().revision == 0 {
-        let endpoint = std::env::var("AGENT_MODEL_ENDPOINT").ok().filter(|v| !v.trim().is_empty());
-        let model = std::env::var("AGENT_MODEL_NAME").ok().filter(|v| !v.trim().is_empty());
+        let endpoint = std::env::var("AGENT_MODEL_ENDPOINT")
+            .ok()
+            .filter(|v| !v.trim().is_empty());
+        let model = std::env::var("AGENT_MODEL_NAME")
+            .ok()
+            .filter(|v| !v.trim().is_empty());
         let (endpoint, model) = match (endpoint, model) {
             (None, None) => return Ok(manager),
             (Some(endpoint), Some(model)) => (endpoint, model),
-            _ => return Err("set both AGENT_MODEL_ENDPOINT and AGENT_MODEL_NAME when importing a fixed model".into()),
+            _ => return Err(
+                "set both AGENT_MODEL_ENDPOINT and AGENT_MODEL_NAME when importing a fixed model"
+                    .into(),
+            ),
         };
         let extra = std::env::var("AGENT_MODEL_EXTRA_JSON")
             .ok()
@@ -65,6 +72,8 @@ pub fn from_environment() -> Result<ModelManager, Box<dyn std::error::Error>> {
                 models: vec![ModelEntry {
                     id: model,
                     enabled: true,
+                    context_window_tokens: std::env::var("AGENT_MODEL_CONTEXT_TOKENS").ok()
+                        .map(|value| value.parse::<u64>()).transpose()?,
                 }],
             },
             extra,
@@ -145,9 +154,7 @@ async fn authenticate(State(auth): State<Arc<Auth>>, request: Request, next: Nex
 struct ApiError(StatusCode, String);
 impl From<AgentError> for ApiError {
     fn from(error: AgentError) -> Self {
-        if error.message.starts_with("settings_conflict:")
-            || error.message.starts_with("default_conflict:")
-        {
+        if error.message.starts_with("settings_conflict:") {
             Self(StatusCode::CONFLICT, error.message)
         } else if error.code == ErrorCode::Configuration {
             Self(StatusCode::BAD_REQUEST, error.message)

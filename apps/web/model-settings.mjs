@@ -100,6 +100,17 @@ export class ModelSettingsClient {
   }
 }
 
+export function parseContextWindow(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  if (!/^[0-9]+$/.test(raw)) throw new Error('上下文窗口必须是正整数；未知时请留空。');
+  const tokens = Number(raw);
+  if (!Number.isSafeInteger(tokens) || tokens < 1 || tokens > 1_000_000_000) {
+    throw new Error('上下文窗口应为 1–1,000,000,000 tokens；未知时请留空。');
+  }
+  return tokens;
+}
+
 export function createProviderId() {
   if (typeof globalThis.crypto?.randomUUID !== 'function') throw new Error('当前浏览器不支持安全的供应商 ID。');
   return globalThis.crypto.randomUUID();

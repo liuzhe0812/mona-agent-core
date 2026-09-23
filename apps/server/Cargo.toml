@@ -6,8 +6,11 @@ license.workspace = true
 publish = false
 
 [features]
-default = ["model-management"]
-model-management = ["dep:models", "dep:serde", "dep:subtle", "dep:tower-http"]
+default = ["model-management", "skills", "compaction", "spill"]
+model-management = ["dep:models"]
+skills = ["dep:skills"]
+compaction = ["dep:compaction"]
+spill = ["dep:spill"]
 
 [dependencies]
 api.workspace = true
@@ -15,17 +18,25 @@ runtime.workspace = true
 application.workspace = true
 http-bridge.workspace = true
 providers.workspace = true
-demo = { path = "../../examples/demo" }
+tools.workspace = true
 axum = "0.8"
 tokio.workspace = true
 futures-util.workspace = true
 serde_json.workspace = true
 models = { path = "../../packages/models", optional = true }
-serde = { workspace = true, optional = true }
-subtle = { version = "2.6", optional = true }
-tower-http = { version = "0.6", features = ["cors"], optional = true }
+skills = { path = "../../packages/skills", optional = true }
+compaction = { path = "../../packages/compaction", optional = true }
+spill = { path = "../../packages/spill", optional = true }
+serde.workspace = true
+subtle = "2.6"
+tower-http = { version = "0.6", features = ["cors"] }
+toml = "0.8"
+tempfile = "3"
+sha2 = "0.10"
 
 [dev-dependencies]
+reqwest.workspace = true
+demo = { path = "../../examples/demo" }
 tauri-bridge.workspace = true
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

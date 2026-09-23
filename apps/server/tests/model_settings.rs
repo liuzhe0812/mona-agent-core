@@ -6,14 +6,14 @@
 mod management;
 
 use api::{AgentExecutor, Result, RunRequest, RunStatus};
-use runtime::HostBuilder;
-use models::{ModelManager, SettingsStore};
 use axum::{
     body::Body,
     http::{Method, Request, StatusCode},
     Router,
 };
 use http_body_util::BodyExt;
+use models::{ModelManager, SettingsStore};
+use runtime::HostBuilder;
 use serde_json::{json, Value};
 use std::{
     sync::{Arc, Mutex},
@@ -233,22 +233,45 @@ async fn management_uses_revision_conflicts_and_controls_default_visibility_and_
     let models = view["providers"][0]["models"]
         .as_array()
         .expect("model list");
-    assert_eq!(models[0], json!({"id": "alpha", "enabled": false}));
-    assert_eq!(models[1], json!({"id": "beta", "enabled": true}));
+    assert_eq!(models[0], json!({"id": "alpha", "enabled": false, "context_window_tokens": null}));
+    assert_eq!(models[1], json!({"id": "beta", "enabled": true, "context_window_tokens": null}));
 
-    let (status, _, conflict) = call(
+    let (status, _, view) = call(
+        router.clone(),
+        Method::POST,
+        "/api/model-settings/providers",
+        Some(TOKEN),
+        Some(provider(3, "backup", "https://backup.example/v1")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(view["revision"], 4);
+
+    let (status, _, view) = call(
+        router.clone(),
+        Method::POST,
+        "/api/model-settings/delete",
+        Some(TOKEN),
+        Some(json!({"revision": 4, "provider_id": "local"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        view["default"],
+        json!({"provider_id":"backup","model_id":"alpha"})
+    );
+
+    let (status, _, view) = call(
         router,
         Method::POST,
         "/api/model-settings/delete",
         Some(TOKEN),
-        Some(json!({"revision": 3, "provider_id": "local"})),
+        Some(json!({"revision": 5, "provider_id": "backup"})),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert!(conflict["message"]
-        .as_str()
-        .unwrap_or_default()
-        .starts_with("default_conflict:"));
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(view["providers"], json!([]));
+    assert!(view["default"].is_null());
 }
 
 async fn read_http_body(socket: &mut TcpStream) -> Value {

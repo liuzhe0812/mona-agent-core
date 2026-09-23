@@ -26,6 +26,12 @@ test('resolveDevConfig starts empty model management without dotenv and constrai
   });
   assert.equal(config.endpoint, 'http://127.0.0.1:8787');
   assert.equal(config.uiOrigin, 'http://127.0.0.1:4173');
+  assert.equal(config.capabilityStatePath, join(config.stateDirectory, 'capabilities.json'));
+  assert.equal(config.spillDirectory, join(config.stateDirectory, 'spill'));
+  assert.equal(config.sessionsDirectory, join(config.stateDirectory, 'sessions'));
+  assert.equal(empty.sessionsDirectory, join(tmpdir(), 'mona-empty-config-test', 'sessions'));
+  const sessionsDirectory = join(tmpdir(), 'explicit-session-store');
+  assert.equal(resolveDevConfig({ AGENT_SESSIONS_DIR: sessionsDirectory }).sessionsDirectory, sessionsDirectory);
   assert.throws(() => resolveDevConfig({ AGENT_MODEL_MANAGEMENT: '0' }), /固定模型模式缺少/);
   assert.throws(() => resolveDevConfig({
     AGENT_SERVER_ADDR: '0.0.0.0:8787',

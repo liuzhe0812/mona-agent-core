@@ -1,7 +1,14 @@
 import { RunView, requestId } from '../../packages/client/src/index.mjs';
 import { HttpAgentClient } from '../../packages/client/src/http.mjs';
 import { TauriAgentClient } from '../../packages/client/src/tauri.mjs';
-import { ModelSettingsClient, createProviderId } from './model-settings.mjs';
+import { ModelSettingsClient, createProviderId, parseContextWindow } from './model-settings.mjs';
+import { CapabilitiesClient } from './capabilities.mjs';
+import { SpillClient } from './spill.mjs';
+import { TurnView } from './run-view.mjs';
+import { ConversationUI } from './sessions-ui.mjs';
+import { mountAppearance } from './appearance.mjs';
+import './tooltip.mjs';
+import './conversation-rail.mjs';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const timeline = $('#timeline');
@@ -9,9 +16,6 @@ const welcome = $('#welcome');
 const prompt = $('#prompt');
 const send = $('#send');
 const cancel = $('#cancel');
-const connectionButton = $('#connection-button');
-const connectionLabel = $('#connection-label');
-const statusDot = $('#status-dot');
 const dialog = $('#connection-dialog');
 const form = $('#connection-form');
 const transport = $('#transport');
@@ -24,6 +28,21 @@ const main = $('#main');
 const chatSidebar = $('#chat-sidebar');
 const chatWorkspace = $('#chat-workspace');
 const settingsPage = $('#settings-page');
+const componentSettingsSection = $('#component-settings-section');
+const toolSettingsSection = $('#tool-settings-section');
+const modelSettingsSection = $('#model-settings-section');
+const componentList = $('#component-list');
+const toolList = $('#tool-list');
+const componentsNotice = $('#components-notice');
+const toolsNotice = $('#tools-notice');
+const componentsRefresh = $('#components-refresh');
+const toolsRefresh = $('#tools-refresh');
+const componentsTab = $('#settings-components-tab');
+const toolsTab = $('#settings-tools-tab');
+const modelsTab = $('#settings-models-tab');
+const appearanceTab = $('#settings-appearance-tab');
+const appearanceSection = $('#appearance-settings-section');
+const appearance = mountAppearance();
 const providerList = $('#provider-list');
 const providerSearch = $('#provider-search');
 const modelList = $('#model-list');
@@ -64,14 +83,36 @@ const openModelSettings = $('#open-model-settings');
 let client = null;
 let active = null;
 let renderFrame = 0;
-let connectionMode = 'none';
+let workTimer = null;
+let starting = false;
 const modelSettings = new ModelSettingsClient();
+const capabilities = new CapabilitiesClient();
+const spillResults = new SpillClient();
+let capabilitiesState = null;
 let modelSettingsState = null;
 let modelSettingsActiveId = null;
 let settingsTransport = 'none';
 let providerEditorId = null;
 let providerEditorRevision = 0;
 let providerEditorModels = [];
+let modelEditor = null;
+const conversations = new ConversationUI({
+  busy: () => starting || Boolean(active && !active.done),
+  changed: () => setBusy(Boolean(active && !active.done)),
+  createTurn,
+  openSettings: () => showSettings(),
+  clear() {
+    active?.subscription?.close(); clearInterval(workTimer);
+    if (renderFrame) cancelAnimationFrame(renderFrame);
+    renderFrame = 0; active = null; timeline.replaceChildren(); welcome.hidden = false;
+  },
+  async live(runId, dom) {
+    const snapshot = await client.snapshot(runId);
+    const view = new RunView(runId);
+    view.apply({ kind: 'snapshot', reason: 'initial', snapshot });
+    void subscribeRun(runId, view, dom);
+  },
+});
 
 function normalizeModelSettings(value) {
   const providers = Array.isArray(value?.providers) ? value.providers.map((provider) => ({
@@ -81,7 +122,8 @@ function normalizeModelSettings(value) {
     has_key: provider?.has_key === true,
     builtin: provider?.builtin === true,
     models: Array.isArray(provider?.models) ? provider.models
-      .map((model) => ({ id: typeof model?.id === 'string' ? model.id : '', enabled: model?.enabled !== false }))
+      .map((model) => ({ id: typeof model?.id === 'string' ? model.id : '', enabled: model?.enabled !== false,
+        context_window_tokens: Number.isSafeInteger(model?.context_window_tokens) && model.context_window_tokens > 0 ? model.context_window_tokens : null }))
       .filter((model) => model.id.length > 0) : [],
   })).filter((provider) => provider.id && provider.name) : [];
   const defaultValue = value?.default && typeof value.default === 'object'
@@ -120,12 +162,18 @@ function setSettingsNotice(message = '', kind = '') {
 }
 
 function clearModelSettings() {
+  conversations.clear();
   modelSettings.clear();
+  capabilities.clear();
+  spillResults.clear();
+  capabilitiesState = null;
   modelSettingsState = null;
   modelSettingsActiveId = null;
   settingsTransport = 'none';
   setSettingsNotice('');
+  setAgentSettingsNotice('all');
   updateModelLabel();
+  renderCapabilities();
   renderModelSettings();
 }
 
@@ -177,16 +225,17 @@ async function handleModelSettingsError(error) {
   }
   if (error?.status === 409) {
     await refreshModelSettings({ silent: true });
-    setSettingsNotice(`${error.message || '设置已发生变化。'} 已刷新，请重试。`, 'error');
+    setSettingsNotice('设置已被其他操作更新，已刷新，请重试。', 'error');
   } else {
     setSettingsNotice(error?.message || '模型设置操作失败。', 'error');
   }
 }
 
 function providerModelsFromLines(lines, previousModels = []) {
-  const previous = new Map(previousModels.map((model) => [model.id, model.enabled !== false]));
+  const previous = new Map(previousModels.map((model) => [model.id, model]));
   const ids = [...new Set(String(lines || '').split(/\r?\n/).map((value) => value.trim()).filter(Boolean))];
-  return ids.map((id) => ({ id, enabled: previous.has(id) ? previous.get(id) : true }));
+  return ids.map((id) => ({ id, enabled: previous.get(id)?.enabled !== false,
+    context_window_tokens: previous.get(id)?.context_window_tokens ?? null }));
 }
 
 function providerSaveBody(provider, fields = {}) {
@@ -222,13 +271,39 @@ async function saveProviderRecord(provider, fields = {}, successMessage = '已�
   }
 }
 
-function showSettings() {
+function selectSettingsSection(section) {
+  if (!['components', 'tools', 'models', 'appearance'].includes(section)) section = 'components';
+  for (const [name, panel, tab] of [
+    ['components', componentSettingsSection, componentsTab],
+    ['tools', toolSettingsSection, toolsTab],
+    ['models', modelSettingsSection, modelsTab],
+    ['appearance', appearanceSection, appearanceTab],
+  ]) {
+    const selected = section === name;
+    panel.hidden = !selected;
+    tab.classList.toggle('active', selected);
+    if (selected) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
+  }
+  if (section === 'appearance') {
+    appearance?.focus();
+  } else if (section === 'models') {
+    renderModelSettings();
+    if (settingsTransport === 'http' && !modelSettingsState) void refreshModelSettings();
+    modelSearch.focus();
+  } else {
+    renderCapabilities();
+    if (settingsTransport === 'http' && !capabilitiesState) void refreshCapabilities();
+    (section === 'tools' ? toolsRefresh : componentsRefresh).focus();
+  }
+}
+
+function showSettings(section = 'components') {
+  closeSidebar();
   chatSidebar.hidden = true;
   chatWorkspace.hidden = true;
   settingsPage.hidden = false;
-  renderModelSettings();
-  if (settingsTransport === 'http' && !modelSettingsState) void refreshModelSettings();
-  modelSearch.focus();
+  selectSettingsSection(section);
 }
 
 function hideSettings() {
@@ -236,6 +311,137 @@ function hideSettings() {
   chatSidebar.hidden = false;
   chatWorkspace.hidden = false;
   prompt.focus();
+}
+
+function normalizeCapabilityEntries(value) {
+  return Array.isArray(value) ? value
+    .filter((item) => item && typeof item.id === 'string' && typeof item.name === 'string')
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      description: typeof item.description === 'string' ? item.description : '',
+      enabled: item.enabled === true,
+      restart_required: item.restart_required === true,
+    })) : [];
+}
+
+function normalizeCapabilities(value) {
+  return {
+    revision: Number.isSafeInteger(value?.revision) ? value.revision : 0,
+    components: normalizeCapabilityEntries(value?.components),
+    tools: normalizeCapabilityEntries(value?.tools),
+  };
+}
+
+function setAgentSettingsNotice(group, message = '', kind = '') {
+  const notices = group === 'all'
+    ? [componentsNotice, toolsNotice]
+    : [group === 'tools' ? toolsNotice : componentsNotice];
+  for (const notice of notices) {
+    notice.textContent = message;
+    notice.className = `settings-notice${kind ? ` ${kind}` : ''}`;
+  }
+}
+
+function capabilityGroup(id) {
+  return capabilitiesState?.tools.some((item) => item.id === id) ? 'tools' : 'components';
+}
+
+async function refreshCapabilities({ silent = false } = {}) {
+  if (!capabilities.configured) {
+    renderCapabilities();
+    return false;
+  }
+  componentsRefresh.disabled = true;
+  toolsRefresh.disabled = true;
+  try {
+    capabilitiesState = normalizeCapabilities(await capabilities.get());
+    if (!silent) setAgentSettingsNotice('all');
+    renderCapabilities();
+    return true;
+  } catch (error) {
+    if (error?.name === 'AbortError') return false;
+    capabilitiesState = null;
+    setAgentSettingsNotice('all', error?.status === 404
+      ? '当前宿主没有提供组件与工具管理接口。'
+      : (error?.message || '读取 Agent 设置失败。'), 'error');
+    renderCapabilities();
+    return false;
+  } finally {
+    componentsRefresh.disabled = false;
+    toolsRefresh.disabled = false;
+  }
+}
+
+async function setCapabilityEnabled(id, enabled) {
+  if (!capabilitiesState) return;
+  const group = capabilityGroup(id);
+  try {
+    capabilitiesState = normalizeCapabilities(await capabilities.update(id, {
+      revision: capabilitiesState.revision,
+      enabled,
+    }));
+    const item = capabilitiesState[group].find((entry) => entry.id === id);
+    setAgentSettingsNotice(group, item?.restart_required ? '已保存，重启后生效。' : '已保存。');
+    renderCapabilities();
+  } catch (error) {
+    if (error?.status === 409) await refreshCapabilities({ silent: true });
+    setAgentSettingsNotice(group, error?.status === 409
+      ? '设置已更新，已刷新，请重试。'
+      : (error?.message || '保存失败。'), 'error');
+    renderCapabilities();
+  }
+}
+
+function renderCapabilityGroup(list, entries, group) {
+  list.replaceChildren();
+  if (!capabilities.configured) {
+    list.append(text('p', 'capability-empty', settingsTransport === 'tauri'
+      ? `Tauri 宿主尚未接入${group === 'tools' ? '工具' : '组件'}管理。`
+      : `连接 HTTP Runtime 后管理 Agent ${group === 'tools' ? '工具' : '组件'}。`));
+    return;
+  }
+  if (!capabilitiesState) {
+    list.append(text('p', 'capability-empty', `正在读取 Agent ${group === 'tools' ? '工具' : '组件'}…`));
+    return;
+  }
+  if (!entries.length) {
+    list.append(text('p', 'capability-empty', `没有可管理的${group === 'tools' ? '工具' : '组件'}。`));
+    return;
+  }
+  for (const item of entries) {
+    const row = document.createElement('article');
+    row.className = 'capability-row';
+    const copy = document.createElement('div');
+    copy.className = 'capability-copy';
+    const title = document.createElement('div');
+    title.append(text('strong', '', item.name));
+    if (item.restart_required) title.append(text('span', 'capability-status pending', item.enabled ? '重启后启用' : '重启后停用'));
+    copy.append(title);
+    if (item.description) copy.append(text('p', '', item.description));
+
+    const actions = document.createElement('div');
+    actions.className = 'capability-actions';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = `model-switch${item.enabled ? ' on' : ''}`;
+    toggle.setAttribute('role', 'switch');
+    toggle.setAttribute('aria-checked', String(item.enabled));
+    toggle.setAttribute('aria-label', `${item.enabled ? '关闭' : '启用'}${item.name}`);
+    toggle.append(document.createElement('span'));
+    toggle.addEventListener('click', () => {
+      toggle.disabled = true;
+      void setCapabilityEnabled(item.id, !item.enabled);
+    });
+    actions.append(toggle);
+    row.append(copy, actions);
+    list.append(row);
+  }
+}
+
+function renderCapabilities() {
+  renderCapabilityGroup(componentList, capabilitiesState?.components || [], 'components');
+  renderCapabilityGroup(toolList, capabilitiesState?.tools || [], 'tools');
 }
 
 function switchButton(provider, model) {
@@ -249,7 +455,7 @@ function switchButton(provider, model) {
   control.setAttribute('aria-checked', String(enabled));
   control.setAttribute('aria-label', `${model.id} ${enabled ? '不在对话中显示' : '在对话中显示'}`);
   control.disabled = isDefault;
-  control.title = isDefault ? '默认模型始终在对话中显示' : (enabled ? '不在对话中显示' : '在对话中显示');
+  control.dataset.tooltip = isDefault ? '默认模型始终在对话中显示' : (enabled ? '不在对话中显示' : '在对话中显示');
   control.append(text('span', '', ''));
   control.addEventListener('click', () => {
     void (async () => {
@@ -297,7 +503,7 @@ function renderProviderDetail(provider) {
   providerApiBase.textContent = provider.api_base || '未设置 API Base';
   editProvider.disabled = false;
   deleteProvider.disabled = provider.builtin;
-  deleteProvider.title = provider.builtin ? '内置供应商不可删除' : '';
+  deleteProvider.dataset.tooltip = provider.builtin ? '内置供应商不可删除' : '';
   discoverModels.disabled = false;
   addModel.disabled = false;
 
@@ -319,6 +525,12 @@ function renderProviderDetail(provider) {
     if (isDefault) title.append(text('span', 'model-badge', '默认对话'));
     if (!model.enabled && !isDefault) title.append(text('span', 'model-badge', '已隐藏'));
     info.append(title);
+    const windowButton = text('button', 'text-button', model.context_window_tokens == null
+      ? '上下文窗口：未知 · 设置' : `上下文窗口：${model.context_window_tokens.toLocaleString()} tokens`);
+    windowButton.type = 'button'; windowButton.dataset.modelContext = model.id;
+    windowButton.setAttribute('aria-label', `设置 ${model.id} 的上下文窗口`);
+    windowButton.addEventListener('click', () => openModelEditor(model));
+    info.append(windowButton);
     row.append(info);
     const defaultButton = text('button', 'set-default', isDefault ? '当前默认' : '设为默认');
     defaultButton.type = 'button';
@@ -459,9 +671,10 @@ async function discoverCurrentProvider() {
     const result = await modelSettings.discover({ provider_id: provider.id, api_base: provider.api_base });
     const discovered = Array.isArray(result?.models) ? result.models.filter((model) => typeof model === 'string') : [];
     if (!discovered.length) throw new Error('供应商没有返回模型。');
-    const existing = new Map(provider.models.map((model) => [model.id, model.enabled !== false]));
+    const existing = new Map(provider.models.map((model) => [model.id, model]));
     const models = [...new Set([...provider.models.map((model) => model.id), ...discovered])]
-      .map((id) => ({ id, enabled: existing.has(id) ? existing.get(id) : true }));
+      .map((id) => ({ id, enabled: existing.get(id)?.enabled !== false,
+        context_window_tokens: existing.get(id)?.context_window_tokens ?? null }));
     await saveProviderRecord(provider, { revision, models }, `已获取并保存 ${discovered.length} 个模型`);
   } catch (error) {
     await handleModelSettingsError(error);
@@ -489,12 +702,17 @@ async function deleteCurrentProvider() {
   }
 }
 
-function openModelEditor() {
+function openModelEditor(model = null) {
   if (!activeProvider() || !modelSettingsState) {
     setSettingsNotice('请先添加或选择供应商。', 'error');
     return;
   }
-  modelIdInput.value = '';
+  modelEditor = { provider_id: activeProvider().id, revision: modelSettingsState.revision, model_id: model?.id ?? null };
+  modelIdInput.value = model?.id ?? '';
+  modelIdInput.disabled = Boolean(model);
+  $('#model-context-tokens').value = model?.context_window_tokens ?? '';
+  $('#model-dialog h2').textContent = model ? '模型上下文窗口' : '添加模型';
+  modelSave.textContent = model ? '保存' : '添加';
   modelFormError.textContent = '';
   modelSave.disabled = false;
   modelDialog.showModal();
@@ -509,14 +727,23 @@ async function addManualModel() {
     modelFormError.textContent = '请输入模型 ID。';
     return false;
   }
-  if (provider.models.some((model) => model.id === id)) {
+  if (!modelEditor || provider.id !== modelEditor.provider_id) {
+    modelFormError.textContent = '供应商已切换，请重新打开模型编辑。'; return false;
+  }
+  let contextWindow;
+  try { contextWindow = parseContextWindow($('#model-context-tokens').value); }
+  catch (error) { modelFormError.textContent = error.message; return false; }
+  if (!modelEditor.model_id && provider.models.some((model) => model.id === id)) {
     modelFormError.textContent = '该模型已经存在。';
     return false;
   }
   modelSave.disabled = true;
   const saved = await saveProviderRecord(provider, {
-    models: [...provider.models, { id, enabled: true }],
-  }, '模型已添加');
+    revision: modelEditor.revision,
+    models: modelEditor.model_id ? provider.models.map(model => model.id === modelEditor.model_id
+      ? { ...model, context_window_tokens: contextWindow } : model)
+      : [...provider.models, { id, enabled: true, context_window_tokens: contextWindow }],
+  }, modelEditor.model_id ? '模型窗口已保存，仅影响新任务' : '模型已添加');
   modelSave.disabled = false;
   if (saved) modelDialog.close();
   return saved;
@@ -569,17 +796,13 @@ async function showModelPicker() {
   modelPickerDialog.showModal();
 }
 
-function setConnection(label, mode = 'none') {
-  connectionMode = mode;
-  connectionLabel.textContent = label;
-  statusDot.dataset.connected = mode === 'http' || mode === 'tauri' ? 'true' : 'false';
-}
-
 function setBusy(busy) {
-  send.disabled = !client || !prompt.value.trim();
+  send.disabled = starting || !client || !prompt.value.trim() || !conversations.canSend;
+  conversations.controls();
   cancel.hidden = !busy;
   send.textContent = busy ? '+' : '↑';
-  send.title = busy ? '向当前任务追加指令' : '发送任务';
+  send.dataset.tooltip = busy ? '向当前任务追加指令' : '发送任务';
+  send.setAttribute('aria-label', send.title);
 }
 
 function text(tag, className, value) {
@@ -589,90 +812,32 @@ function text(tag, className, value) {
   return node;
 }
 
-function statusText(status) {
-  return ({ pending: '等待', running: '执行中', completed: '完成', failed: '失败', cancelled: '已取消', denied: '已拒绝', skipped: '已跳过', unknown: '状态未知' })[status] || status;
-}
-
-function outcomeText(outcome) {
-  return ({ completed: '任务完成', failed: '任务失败', cancelled: '任务已取消', timed_out: '任务超时', limited: '达到运行限制' })[outcome.status] || outcome.status;
-}
-
 function createTurn(userText) {
   welcome.hidden = true;
-  const turn = document.createElement('article');
-  turn.className = 'turn';
-  const user = text('div', 'user-message', userText);
-  const body = document.createElement('div');
-  body.className = 'assistant-body';
-  const items = document.createElement('div');
-  items.className = 'items';
-  const footer = text('div', 'run-footer', '正在启动…');
-  body.append(items, footer);
-  turn.append(user, body);
-  timeline.append(turn);
+  const dom = new TurnView(userText, {
+    readArtifact: (runId, uri, offset) => spillResults.readPage(runId, uri, offset),
+  });
+  timeline.append(dom.turn);
   main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
-  return { turn, items, footer };
-}
-
-function renderTool(item) {
-  const card = document.createElement('details');
-  card.className = `tool-card state-${item.state}`;
-  if (item.state === 'running' || item.state === 'failed' || item.state === 'unknown') card.open = true;
-  const summary = document.createElement('summary');
-  summary.append(text('span', 'tool-icon', '⌘'), text('strong', '', item.content.name || 'tool'), text('span', 'tool-state', statusText(item.state)));
-  card.append(summary);
-
-  if (item.content.arguments_text) {
-    const section = document.createElement('section');
-    section.append(text('label', '', '参数'), text('pre', '', item.content.arguments_text));
-    card.append(section);
-  }
-  if (item.content.output) {
-    const section = document.createElement('section');
-    section.append(text('label', '', '执行输出'), text('pre', '', item.content.output));
-    card.append(section);
-  }
-  if (item.content.result) {
-    const result = item.content.result;
-    const section = document.createElement('section');
-    section.append(text('label', '', `结果 · ${result.status}`), text('pre', '', result.content || '无文本结果'));
-    card.append(section);
-  }
-  return card;
+  return dom;
 }
 
 function renderActive() {
   renderFrame = 0;
   if (!active) return;
+  const nearBottom = main.scrollHeight - main.scrollTop - main.clientHeight < 120;
   const state = active.view.state;
-  active.dom.items.replaceChildren();
-  for (const item of state.items) {
-    if (item.content.kind === 'agent_message') {
-      const block = document.createElement('div');
-      block.className = `assistant-message state-${item.state}`;
-      block.append(text('div', 'assistant-mark', 'M'), text('div', 'message-text', item.content.text || (item.state === 'running' ? '…' : '')));
-      active.dom.items.append(block);
-    } else {
-      active.dom.items.append(renderTool(item));
-    }
-  }
-  if (state.pruned_items) {
-    active.dom.items.append(text('p', 'muted-note', `较早的 ${state.pruned_items} 个显示项已从 UI 视图裁剪。`));
-  }
+  active.dom.update(state);
   if (state.outcome) {
-    const outcome = state.outcome;
-    active.dom.footer.className = `run-footer outcome-${outcome.status}`;
-    active.dom.footer.textContent = `${outcomeText(outcome)} · ${outcome.steps} 步 · ${outcome.task_usage.model_calls} 次模型请求`;
-    if (outcome.error) active.dom.footer.append(text('span', 'error-detail', ` · ${outcome.error.message}`));
-    active.done = true;
-    active.subscription?.close();
+    if (!active.done) {
+      active.done = true;
+      active.subscription?.close();
+      clearInterval(workTimer);
+      void conversations.settled();
+    }
     setBusy(false);
-  } else {
-    active.dom.footer.className = 'run-footer';
-    active.dom.footer.textContent = state.started ? `第 ${state.step || 1} 步执行中` : '正在启动…';
-    setBusy(true);
-  }
-  main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
+  } else setBusy(true);
+  if (nearBottom) main.scrollTo({ top: main.scrollHeight });
 }
 
 function scheduleRender() {
@@ -681,31 +846,44 @@ function scheduleRender() {
 }
 
 async function subscribeRun(runId, view, dom) {
+  const run = { runId, view, dom, subscription: null, done: false };
+  active = run;
+  clearInterval(workTimer);
+  scheduleRender();
+  if (view.state.outcome) return;
   const subscription = client.subscribe(runId, {
-    after: 0,
+    after: view.state.seq,
     onFrame(frame) {
+      if (active !== run) return;
       view.apply(frame);
       scheduleRender();
     },
   });
-  active = { runId, view, dom, subscription, done: false };
+  run.subscription = subscription;
+  workTimer = setInterval(() => dom.tick(), 1000);
   try {
     await subscription.closed;
-    if (!active?.done) {
+    if (active !== run) return;
+    if (!view.state.outcome) {
       const snapshot = await client.snapshot(runId);
+      if (active !== run) return;
       view.apply({ kind: 'snapshot', reason: 'source_resync', snapshot });
+      if (!snapshot.outcome) throw new Error('事件流提前结束，请刷新历史重新连接');
       scheduleRender();
     }
   } catch (error) {
-    dom.footer.className = 'run-footer outcome-failed';
-    dom.footer.textContent = `连接中断：${error?.message || error}`;
+    if (active !== run) return;
+    clearInterval(workTimer);
+    active = null;
+    dom.fail(`连接中断：${error?.message || error}`);
+    conversations.notice('连接中断不代表任务已结束。点击历史会话的“刷新”检查运行状态；不会自动重复执行。', true);
     setBusy(false);
   }
 }
 
 async function submitPrompt() {
   const value = prompt.value.trim();
-  if (!value || !client) return;
+  if (!value || !client || starting || !conversations.canSend) return;
   prompt.value = '';
   setBusy(Boolean(active && !active.done));
   if (active && !active.done) {
@@ -719,16 +897,24 @@ async function submitPrompt() {
     return;
   }
 
-  $('#thread-title').textContent = value.slice(0, 26) || '新对话';
+  if (!conversations.persistent) $('#thread-title').textContent = value.slice(0, 26) || '临时任务';
   const dom = createTurn(value);
+  starting = true;
+  setBusy(false);
   try {
     const request = { request_id: requestId(), prompt: value };
-    const response = await client.start(request);
-    const view = new RunView(response.run_id);
-    void subscribeRun(response.run_id, view, dom);
+    const response = conversations.persistent ? await conversations.submit(value) : await client.start(request);
+    starting = false;
+    if (conversations.persistent && (response.reused || !response.live || !response.run_id)) {
+      await conversations.open(response.session.id);
+    } else {
+      const view = new RunView(response.run_id);
+      void subscribeRun(response.run_id, view, dom);
+    }
   } catch (error) {
-    dom.footer.className = 'run-footer outcome-failed';
-    dom.footer.textContent = `启动失败：${error?.message || error}`;
+    starting = false;
+    dom.fail(`启动失败：${error?.message || error}`);
+    if (!prompt.value) prompt.value = value;
     setBusy(false);
   }
 }
@@ -754,9 +940,12 @@ async function connectHttp(baseUrl, bearer) {
   client = candidate;
   settingsTransport = 'http';
   modelSettings.configure(baseUrl, bearer);
-  setConnection(`HTTP · ${new URL(baseUrl).host}`, 'http');
+  capabilities.configure(baseUrl, bearer);
+  spillResults.configure(baseUrl, bearer);
   setBusy(false);
   void refreshModelSettings({ silent: true });
+  void refreshCapabilities({ silent: true });
+  await conversations.configure(baseUrl, bearer);
 }
 
 async function connectTauri() {
@@ -765,8 +954,9 @@ async function connectTauri() {
   if (!native?.invoke || !native?.Channel) throw new Error('当前页面不在已配置的 Tauri 宿主中。');
   client = new TauriAgentClient({ invoke: native.invoke, Channel: native.Channel });
   settingsTransport = 'tauri';
+  renderCapabilities();
   renderModelSettings();
-  setConnection('Tauri · 本机 Runtime', 'tauri');
+  conversations.ephemeral('当前 Tauri 宿主尚未装配会话管理；此连接仅支持临时任务。正式 Web 宿主支持本地保存。');
   setBusy(false);
 }
 
@@ -784,23 +974,16 @@ async function autoConnect() {
     await connectHttp(config.endpoint, config.token);
   } catch {
     clearModelSettings();
-    setConnection('未连接', 'none');
   }
 }
 
-connectionButton.addEventListener('click', () => {
-  connectionError.textContent = '';
-  transport.value = connectionMode === 'tauri' ? 'tauri' : 'http';
-  httpFields.hidden = transport.value !== 'http';
-  dialog.showModal();
-});
 transport.addEventListener('change', () => { httpFields.hidden = transport.value !== 'http'; });
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   connectionError.textContent = '';
   connectButton.disabled = true;
   try {
-    if (active && !active.done) throw new Error('当前任务仍在运行，请先停止并等待最终状态。');
+    if (starting || conversations.loading || (active && !active.done)) throw new Error('会话正在加载、保存或执行，请等待完成；运行中的任务需先停止并等待最终状态。');
     if (transport.value === 'tauri') await connectTauri();
     else await connectHttp(endpoint.value.trim().replace(/\/$/, ''), token.value);
     token.value = '';
@@ -832,14 +1015,12 @@ cancel.addEventListener('click', async () => {
   }
 });
 $('#new-chat').addEventListener('click', () => {
-  if (active && !active.done) {
+  if (starting || (active && !active.done)) {
     alert('请先停止当前任务并等待最终状态。');
     return;
   }
-  timeline.replaceChildren();
-  welcome.hidden = false;
-  $('#thread-title').textContent = '新对话';
-  active = null;
+  if (!conversations.newChat()) return;
+  closeSidebar();
   prompt.focus();
 });
 for (const button of document.querySelectorAll('[data-prompt]')) {
@@ -849,11 +1030,104 @@ for (const button of document.querySelectorAll('[data-prompt]')) {
     setBusy(false);
   });
 }
-$('#theme-toggle').addEventListener('click', () => {
-  const dark = document.documentElement.dataset.theme === 'dark';
-  document.documentElement.dataset.theme = dark ? 'light' : 'dark';
+$('#settings-button').addEventListener('click', () => showSettings());
+componentsTab.addEventListener('click', () => selectSettingsSection('components'));
+toolsTab.addEventListener('click', () => selectSettingsSection('tools'));
+modelsTab.addEventListener('click', () => selectSettingsSection('models'));
+appearanceTab.addEventListener('click', () => selectSettingsSection('appearance'));
+componentsRefresh.addEventListener('click', () => { void refreshCapabilities(); });
+toolsRefresh.addEventListener('click', () => { void refreshCapabilities(); });
+const shell = $('.shell');
+const sidebarToggle = $('#sidebar-toggle');
+const sidebarScrim = $('#sidebar-scrim');
+const sidebarResizer = $('#sidebar-resizer');
+const mobileLayout = matchMedia('(max-width: 680px)');
+function syncSidebar() {
+  const open = mobileLayout.matches ? shell.classList.contains('sidebar-open') : !shell.classList.contains('sidebar-collapsed');
+  chatSidebar.inert = !open;
+  sidebarToggle.setAttribute('aria-expanded', String(open));
+  sidebarScrim.hidden = !mobileLayout.matches || !open;
+  chatWorkspace.inert = mobileLayout.matches && open;
+}
+function closeSidebar() {
+  shell.classList.remove('sidebar-open');
+  syncSidebar();
+}
+sidebarToggle.addEventListener('click', () => {
+  shell.classList.toggle(mobileLayout.matches ? 'sidebar-open' : 'sidebar-collapsed');
+  syncSidebar();
+  if (mobileLayout.matches) $('#new-chat').focus();
 });
-$('#settings-button').addEventListener('click', showSettings);
+sidebarScrim.addEventListener('click', () => { closeSidebar(); sidebarToggle.focus(); });
+mobileLayout.addEventListener('change', closeSidebar);
+// Sidebar width is a browser-local layout preference: dragged or arrow-keyed, applied at once,
+// persisted on release. A storage failure keeps this session's width and never claims it was saved.
+const SIDEBAR_WIDTH_KEY = 'mona.web.sidebar.v1';
+const SIDEBAR_MIN_WIDTH = 208;
+const SIDEBAR_MAX_WIDTH = 460;
+const SIDEBAR_DEFAULT_WIDTH = 264;
+const SIDEBAR_KEYBOARD_STEP = 16;
+const clampSidebarWidth = value => Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(value)));
+function restoreSidebarWidth() {
+  try {
+    const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    if (Number.isFinite(saved) && saved > 0) return clampSidebarWidth(saved);
+  } catch { /* 存储被拒绝时使用响应式默认宽度 */ }
+  return null;
+}
+let sidebarWidth = SIDEBAR_DEFAULT_WIDTH;
+function renderedSidebarWidth() {
+  return Math.round(chatSidebar.getBoundingClientRect().width) || sidebarWidth;
+}
+function applySidebarWidth(value) {
+  sidebarWidth = clampSidebarWidth(value);
+  shell.style.setProperty('--sidebar-width', `${sidebarWidth}px`);
+  sidebarResizer.setAttribute('aria-valuenow', String(sidebarWidth));
+}
+function persistSidebarWidth() {
+  try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth)); }
+  catch { /* 保存失败不回滚本次宽度，也不假装已保存 */ }
+}
+sidebarResizer.setAttribute('aria-valuemin', String(SIDEBAR_MIN_WIDTH));
+sidebarResizer.setAttribute('aria-valuemax', String(SIDEBAR_MAX_WIDTH));
+const storedSidebarWidth = restoreSidebarWidth();
+if (storedSidebarWidth != null) applySidebarWidth(storedSidebarWidth);
+else sidebarResizer.setAttribute('aria-valuenow', String(renderedSidebarWidth()));
+let resizeGesture = null;
+sidebarResizer.addEventListener('pointerdown', event => {
+  if (mobileLayout.matches || shell.classList.contains('sidebar-collapsed')) return;
+  resizeGesture = { pointer: event.pointerId, startX: event.clientX, startWidth: renderedSidebarWidth() };
+  sidebarResizer.setPointerCapture(event.pointerId);
+  shell.classList.add('sidebar-resizing');
+  event.preventDefault();
+});
+sidebarResizer.addEventListener('pointermove', event => {
+  if (!resizeGesture || event.pointerId !== resizeGesture.pointer) return;
+  applySidebarWidth(resizeGesture.startWidth + event.clientX - resizeGesture.startX);
+});
+function endSidebarResize(event) {
+  if (!resizeGesture || (event && event.pointerId !== resizeGesture.pointer)) return;
+  resizeGesture = null;
+  shell.classList.remove('sidebar-resizing');
+  persistSidebarWidth();
+}
+sidebarResizer.addEventListener('pointerup', endSidebarResize);
+sidebarResizer.addEventListener('pointercancel', endSidebarResize);
+sidebarResizer.addEventListener('keydown', event => {
+  const step = event.key === 'ArrowLeft' ? -SIDEBAR_KEYBOARD_STEP
+    : event.key === 'ArrowRight' ? SIDEBAR_KEYBOARD_STEP : 0;
+  if (!step) return;
+  event.preventDefault();
+  applySidebarWidth(renderedSidebarWidth() + step);
+  persistSidebarWidth();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && shell.classList.contains('sidebar-open')) { closeSidebar(); sidebarToggle.focus(); }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n' && !document.querySelector('dialog[open]')) {
+    event.preventDefault(); $('#new-chat').click(); closeSidebar();
+  }
+});
+syncSidebar();
 $('#settings-back').addEventListener('click', hideSettings);
 $('#model-button').addEventListener('click', () => { void showModelPicker(); });
 providerSearch.addEventListener('input', renderModelSettings);
@@ -863,7 +1137,7 @@ addProvider.addEventListener('click', () => openProviderEditor());
 editProvider.addEventListener('click', () => openProviderEditor(activeProvider()));
 deleteProvider.addEventListener('click', () => { void deleteCurrentProvider(); });
 discoverModels.addEventListener('click', () => { void discoverCurrentProvider(); });
-addModel.addEventListener('click', openModelEditor);
+addModel.addEventListener('click', () => openModelEditor());
 toggleAllModels.addEventListener('click', () => {
   const provider = activeProvider();
   if (!provider || !modelSettingsState) return;
@@ -925,23 +1199,39 @@ modelForm.addEventListener('submit', (event) => {
 openModelSettings.addEventListener('click', (event) => {
   event.preventDefault();
   modelPickerDialog.close();
-  showSettings();
+  showSettings('models');
 });
 providerDialog.addEventListener('close', () => {
   providerKeyInput.value = '';
   providerClearKey.checked = false;
   providerFormError.textContent = '';
 });
-for (const [dialogElement, formElement] of [[providerDialog, providerForm], [modelDialog, modelForm], [modelPickerDialog, $('#model-picker-form')]]) {
+for (const [dialogElement, canDismiss] of [
+  [dialog, () => !connectButton.disabled],
+  [providerDialog, () => !providerSave.disabled],
+  [modelDialog, () => !modelSave.disabled],
+  [modelPickerDialog, () => true],
+]) {
   for (const button of dialogElement.querySelectorAll('button[value="cancel"]')) {
     button.addEventListener('click', (event) => {
-      if (button.type === 'button') event.preventDefault();
-      dialogElement.close();
+      event.preventDefault();
+      if (canDismiss()) dialogElement.close('cancel');
     });
   }
+  dialogElement.addEventListener('cancel', (event) => {
+    if (!canDismiss()) event.preventDefault();
+  });
+  dialogElement.addEventListener('click', (event) => {
+    if (event.target !== dialogElement || !canDismiss()) return;
+    const rect = dialogElement.getBoundingClientRect();
+    const inside = event.clientX >= rect.left && event.clientX <= rect.right
+      && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    if (!inside) dialogElement.close('cancel');
+  });
 }
 
 setBusy(false);
 updateModelLabel();
+renderCapabilities();
 renderModelSettings();
 void autoConnect();

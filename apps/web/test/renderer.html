@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>本地 UI 测试 · 执行过程</title>
+<link rel="stylesheet" href="../styles.css">
+<style>body{overflow:auto;padding:24px}#sample{max-width:900px;margin:32px auto}#report{white-space:pre-wrap}</style>
+<h1>本地 UI 测试 · 执行过程</h1>
+<p>仅使用测试数据，直接验证正式 TurnView 的 DOM 行为，不连接模型或 Runtime。</p>
+<pre id="report" role="status">测试中…</pre>
+<div id="sample"></div>
+<script type="module">
+import { TurnView } from '../run-view.mjs';
+const report = document.querySelector('#report');
+const results = [];
+function check(condition, label) { if (!condition) throw new Error(label); results.push(`通过：${label}`); }
+try {
+  const view = new TurnView('本地 UI 测试数据：检查两级展开与流式更新', {
+    readArtifact: async (_runId, _uri, offset) => offset === 0
+      ? {text:'完整结果第一页。',next_offset:24,total_bytes:48,eof:false}
+      : {text:'完整结果第二页。',next_offset:48,total_bytes:48,eof:true},
+  });
+  document.querySelector('#sample').append(view.turn);
+  const item = {id:'tool-1',step:1,state:'running',content:{kind:'tool_call',name:'exec_command',arguments_text:'{"cmd":"npm run test:web"}',output:'正在运行…',result:null}};
+  const state = {run_id:'fixture-run',items:[item],outcome:null,pruned_items:0};
+  view.update(state);
+  check(view.process.open && !view.items.querySelector('details').open, '执行中自动展开过程，每个任务默认折叠');
+  const detail = view.items.querySelector('details');
+  detail.querySelector('summary').click();
+  item.content.output += '\n新的流式输出';
+  view.update(state);
+  check(view.process.open && detail.open && detail === view.items.querySelector('details'), '新输出保留两级展开状态和原始 DOM 节点');
+  detail.querySelector('summary').click();
+  item.state = 'completed';
+  item.content.result = {status:'success',content:'全部通过',truncated:true,artifact:{uri:'spill:sp_fixture',bytes:48}};
+  view.update(state);
+  check(!detail.open && view.process.open, '用户收起步骤后后续更新不会强制展开');
+  detail.querySelector('summary').click();
+  check(detail.textContent.includes('结果过长，已截断显示。'), '截断结果保留明确提示');
+  const spillButton = [...detail.querySelectorAll('button')].find(button => button.textContent.includes('完整结果'));
+  spillButton.click(); await new Promise(resolve => setTimeout(resolve, 0));
+  spillButton.click(); await new Promise(resolve => setTimeout(resolve, 0));
+  check(detail.textContent.includes('完整结果第一页。完整结果第二页。') && spillButton.disabled, 'Spill 完整结果按页读取并以纯文本追加');
+  state.outcome = {status:'completed',output:['<img src=x onerror=alert(1)>','','## 交付说明','','1. 完成检查','2. **保留展开**','   - 嵌套项','','| 字段 | 值 |','| --- | --- |','| a | 1 |','','> 引用一行','','[安全](https://example.com/a) 与 [危险](javascript:alert(1))','','```html','<script>alert(1)<\/script>','```'].join('\n')};
+  view.update(state);
+  check(!view.process.open, '执行完成后自动收起整个过程');
+  check(!view.answer.querySelector('img,script') && view.answer.textContent.includes('<img'), '模型 HTML 被当作文本，不能执行');
+  check(view.answer.querySelector('ol li strong') && view.answer.querySelector('pre code'), '最终回复支持列表、强调和代码块');
+  check(view.answer.querySelector('h2')?.textContent === '交付说明', '标题按层级渲染');
+  check(view.answer.querySelector('ol li ul li')?.textContent === '嵌套项', '嵌套列表渲染在父项内');
+  check(view.answer.querySelector('.message-table td')?.textContent === 'a', '表格渲染为真实表格');
+  check(view.answer.querySelector('blockquote')?.textContent.includes('引用一行'), '引用块独立渲染');
+  check(view.answer.querySelector('a[href="https://example.com/a"]') !== null
+    && view.answer.querySelector('a[href^="javascript"]') === null
+    && view.answer.textContent.includes('[危险](javascript:alert(1))'), '只有安全协议渲染为链接');
+  const completedAt = view.endedAt;
+  view.update(state);
+  check(view.endedAt === completedAt, '结束后的重复快照不重置用时');
+
+  const command = index => ({ id:`step-4-tool-${index}`, step:4, state:'completed', content:{ kind:'tool_call', name:'exec_command', call_id:`call-${index}`, arguments:{ command:`Get-Content .env -TotalCount ${index}` }, arguments_text:`{"command":"Get-Content .env -TotalCount ${index}"}`, output:`第 ${index} 条命令输出`, result:{ status:'success', content:`第 ${index} 条命令输出`, truncated:false, artifact:null } } });
+  const grouped = new TurnView('本地 UI 测试数据：同一步骤的多个命令', {});
+  document.querySelector('#sample').append(grouped.turn);
+  const bare = { id:'step-5-tool-0', step:5, state:'completed', content:{ kind:'tool_call', name:'read_file' } };
+  const blankTurn = { id:'step-4-message', step:4, state:'completed', content:{ kind:'agent_message', text:'', truncated:false } };
+  const ansiText = '\u001b[32;1mName\u001b[0m Length\n报告.md 3';
+  const ansiTurn = { id:'step-6-tool-0', step:6, state:'completed', content:{ kind:'tool_call', name:'exec_command', arguments:{ command:'Get-ChildItem' }, arguments_text:'{"command":"Get-ChildItem"}', output:ansiText, result:{ status:'success', content:ansiText, truncated:false, artifact:null } } };
+  grouped.update({ run_id:'fixture-group', items:[command(0), blankTurn, command(1), bare, ansiTurn], outcome:{ status:'completed', output:'本地 UI 测试数据：任务已完成。' } });
+  const group = grouped.items.querySelector('details.activity-group');
+  check(group && group.querySelectorAll('details.activity-item').length === 2, '同一步骤的多个工具调用折叠成一个组');
+  check(!group.open && group.textContent.includes('终端'), '结束后的工具组默认收起并显示工具类别标题');
+  check(grouped.items.querySelector('.activity-summary .activity-state').hidden, '已完成的行不重复显示完成状态');
+  check(grouped.items.querySelector('.activity-icon svg') !== null, '过程行使用线条图标');
+  group.open = true;
+  const groupedRow = group.querySelector('details.activity-item');
+  check(groupedRow.querySelector('.activity-name').textContent === '终端' && groupedRow.querySelector('.activity-preview').textContent.includes('Get-Content'), '行的标签是工具类别，命令作为摘要显示');
+  groupedRow.open = true;
+  check(getComputedStyle(groupedRow.querySelector('.activity-preview')).visibility === 'hidden', '展开的行不再重复显示命令摘要');
+  check(groupedRow.querySelector('.activity-panel-prompt')?.textContent === '$ ' && groupedRow.textContent.includes('第 0 条命令输出'), '展开行在卡片里显示命令与执行输出');
+  check(groupedRow.querySelector('.activity-panel-foot') === null && groupedRow.querySelector('.activity-panel-title') === null, '卡片不再重复工具名，也没有状态页脚');
+  check(groupedRow.querySelectorAll('.activity-panel-output').length === 1, '结果与日志相同时只显示一次正文');
+  const topRows = [...grouped.items.querySelectorAll(':scope > details.activity-item')];
+  const bareRow = topRows[0].querySelector('summary');
+  bareRow.click();
+  check(bareRow.classList.contains('is-static') && !bareRow.parentElement.open, '没有详情的行保持为普通行且不可展开');
+  check(!bareRow.querySelector('.chevron').checkVisibility(), '没有详情的行不显示折叠指示');
+  check(topRows.length === 2 && !grouped.items.textContent.includes('模型回复'), '没有文本的模型回合不生成空行，也不打断工具组');
+  const ansiRow = topRows[1];
+  ansiRow.open = true;
+  check(ansiRow.textContent.includes('Name Length') && !ansiRow.textContent.includes('\u001b'), '终端输出中的 ANSI 控制序列在显示前被去除');
+
+  const markdownView = new TurnView('本地 UI 测试数据：过程内的模型回复', {});
+  document.querySelector('#sample').append(markdownView.turn);
+  markdownView.update({ run_id:'fixture-markdown', outcome:{ status:'completed', output:'本地 UI 测试数据：最终回复。' },
+    items:[{ id:'step-7-message', step:7, state:'completed', content:{ kind:'agent_message', truncated:false,
+      text:'## 计划\n\n- 第一点\n- 第二点\n\n| 项 | 值 |\n| --- | --- |\n| a | 1 |' } }] });
+  const markdownRow = markdownView.items.querySelector('details.activity-item');
+  check(markdownRow.querySelector('.activity-preview').textContent === '计划', '行的单行摘要去掉 Markdown 标记');
+  markdownRow.open = true;
+  check(markdownRow.querySelector('.activity-panel h2')?.textContent === '计划'
+    && markdownRow.querySelector('.activity-panel .message-table td')?.textContent === 'a', '过程内的模型回复按 Markdown 渲染');
+  report.textContent = `${results.length} 项浏览器检查通过\n${results.join('\n')}`;
+} catch (error) { report.textContent = `失败：${error.message}\n${results.join('\n')}`; throw error; }
+</script>
+</html>
