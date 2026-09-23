@@ -1,20 +1,22 @@
 # Mona Agent Harness v0.3.0
 
-**可嵌入的组件化 Rust Agent Harness + 统一应用层 + 可独立选择的 Tauri / HTTP 桥接。**
+**最小执行底座 + 面向不同生产场景的可复用 Agent 扩展能力 + Web 产品。**
 
 组件负责能力，公共接口定义边界，宿主负责组合。普通 API 与薄 Plugin 入口可以并存；Plugin 是组件接入运行时的一种方式，不要求所有组件都插件化。
 
-本版保留唯一默认ReAct、插件框架、统一应用层和两个可选bridge，只补四类通用契约：**多模态内容/工具输出、每轮工具视图、可等待检查点、模型参数/私有协议保真**。不添加Mona业务功能，不加入JEV。
+底座提供唯一默认执行循环及可靠执行约束；模型、工具、上下文和存储等能力按场景装配；Web 提供实际可用的交互与配置。编程、运维、办公是使用场景，不是额外架构层。当前仍为 Demo 开发阶段，不维护旧版接口、配置或文件格式兼容。
 
-Rust插件API升级到3；UI流式协议保持2。默认仍可只用字符串和内存执行；持久化sink、业务工具和两桥接均按需装配。
+当前 Rust 插件 API 为 7，UI 流式协议为 2。Server 当前默认的四工具组合不构成通用底座的必选工具集；各宿主按需要装配。
 
 ## 交付状态
 
-当前工作树已完成 Rust workspace 测试、文档测试、服务无默认 feature 编译、Tauri 原生 feature 编译，以及 JavaScript/TypeScript 和 Web 启动器检查。隔离环境中的 `npm run dev:web` 可启动并打开空模型设置页。具体范围见[交付报告](docs/DELIVERY.zh-CN.md)与 `verification/`。
+当前仍处于 Demo 开发阶段。已实现能力与限制以各包 README 为准；最近的取消、输出归档和策略派发修复及验证见[机制复核](docs/MINIMAL-HARNESS-REVIEW-2026-09-23.zh-CN.md#三个缺陷的修复与验证)。`verification/` 与旧交付报告是历史证据，不代表当前工作树所有路径已重新验收。
 
 真实付费供应商流、原生 Tauri 窗口交互、高并发和生产认证/租户策略仍需在目标环境联调；本地模拟端点和 mock 测试不替代这些验收。
 
 ## 1. 结构与依赖
+
+完整的[包介绍与文档索引](packages/README.md)说明各包职责和接入定位；具体接口、配置及限制在各包 README 中维护。基础工具的使用方式见 [tools 包说明](packages/tools/README.md)，文档同步要求见 [AGENTS.md](AGENTS.md#包介绍与文档维护)。
 
 ```text
                  业务界面 / 其他调用者
@@ -40,6 +42,10 @@ Rust插件API升级到3；UI流式协议保持2。默认仍可只用字符串和
 | `packages/runtime` | 默认 ReAct、工具执行、状态、插件生命周期 | 可直接用于 CLI/嵌入式宿主 |
 | `packages/providers` | HTTP/SSE 模型适配器 | 使用真实模型时装配 |
 | `packages/models` | 模型配置、目录、默认选择与路由 | 可选；需要管理页面时装配 |
+| `packages/tools` | `read/shell/edit/write` 及可选 `grep/find/ls` | 正式 Server 固定四工具，可选增加三个检索工具 |
+| `packages/skills` | 技能发现与摘要目录，通过 `read` 渐进加载 | 独立组件；发行版包含但 Web 默认关闭 |
+| `packages/compaction` | 请求接近预算时摘要较早的已结算历史 | 独立组件；正式 Web 默认装配，短任务不调用摘要 |
+| `packages/spill` | 长文本结果和流式命令输出共用归档、配额与读取接口 | 正式 Web 默认装配，通过 `read` 和宿主会话授权取回 |
 | `packages/application` | start/cancel/input/subscribe/snapshot/result/forget | 需要界面或远程入口时选用 |
 | `packages/tauri-bridge` | Tauri 2 插件、Command、Channel + ACK | 本机桌面，不启动 HTTP 服务 |
 | `packages/http-bridge` | Axum 路由、Bearer 校验、HTTP + SSE | 浏览器、远程客户端 |
@@ -81,6 +87,7 @@ Rust插件API升级到3；UI流式协议保持2。默认仍可只用字符串和
 | 工具视图 | Run可信上限 + 每轮ToolSelector，执行时二次核对本轮集合 | 能力组/MCP发现/订阅规则；无热加载 |
 | 检查点 | optional CheckpointSink、按Run串行提交、派发前intent、部分结果、失败停止 | 数据库、聊天Session、自动恢复和exactly-once |
 | 模型协议 | 有界ModelOptions、命名空间ProviderData、参数白名单与回传验证 | 厂商专用适配、凭据管理、真实模型兼容性 |
+| 上下文/长结果治理 | 完整请求字节预算、可选Compaction、可选Spill与受控取回 | 精确Tokenizer、永久会话存储、跨权限域附件服务 |
 
 私有协议、内嵌图片和structured结果不直接流向UI。默认桥接仍是文本prompt入口；多模态界面由可信应用完成附件授权与RunRequest构造。这个版本不是Mona的直接替换包。
 
@@ -89,6 +96,8 @@ Rust插件API升级到3；UI流式协议保持2。默认仍可只用字符串和
 ## 5. 验证入口
 
 可选的[模型管理与 Web 设置](docs/MODEL-MANAGEMENT.zh-CN.md)由 `packages/models` 组件和宿主接口提供；未装配时仍可直接注入固定模型，不改变通用任务协议。
+
+正式 Server 使用 [Agent 能力装配配置](docs/CAPABILITY-ASSEMBLY.zh-CN.md)：部署者通过 `agent.toml` 决定能力默认状态和用户可配置范围，最终用户在“设置 → Agent 能力”中管理允许调整的能力。变更在宿主重启后生效。
 
 需要 Rust stable + cargo/rustfmt/clippy。第一次解析依赖需要网络；首次成功生成的 Cargo.lock 应保留并在产品发布时固定工具链。
 
@@ -118,9 +127,15 @@ node --test packages/client/test/*.test.mjs
 
 `server` 在 `127.0.0.1:8787` 监听。必须通过环境变量传入随机生成、至少 32 字符的 `AGENT_SERVER_TOKEN`，没有默认密码。
 
+部署配置可通过 `cargo run -p server -- --config agent.toml` 显式指定；不指定时读取启动目录中的 `agent.toml`，文件不存在则使用内置默认值。
+
 正式通用 Web UI 的本地开发入口是 `npm run dev:web`；它自动生成本机 Bridge Token 和设置存储密钥，无需 `.env`。首次模型供应商在设置页配置。
 
-`cargo run -p server -- --demo` 使用明确标记的离线脚本模型，演示工具调用、工具进度和逐字输出；不是实际 LLM。去掉 `--demo` 时配置 `AGENT_MODEL_ENDPOINT`、`AGENT_MODEL_NAME`、`AGENT_MODEL_KEY`。`.env.example` 仅作为说明，不会自动加载。
+正式 Web 现在默认提供[本地会话保存](docs/LOCAL-SESSIONS.zh-CN.md)：历史按工作空间存入用户目录，可在重启后查看并继续对话，支持名称搜索、重命名和删除。异常退出恢复确认过的记录并标识中断，不自动重跑工具。持久化属于 `apps/server`，不强制嵌入式 Runtime 落盘。
+
+[上下文管理](docs/CONTEXT-MANAGEMENT.zh-CN.md)已区分完整档案与模型工作集：摘要跨轮次和重启复用，模型窗口可在设置页逐模型填写，Skills/项目规则先计入预算，同会话历史 Spill 引用经过归属验证后可读取。项目规则是可关闭的宿主能力，不增加万能 `context` 包。
+
+`cargo run -p server -- --demo` 使用明确标记的离线脚本模型演示逐字输出；它不是实际 LLM，也不注册演示工具。去掉 `--demo` 时配置 `AGENT_MODEL_ENDPOINT`、`AGENT_MODEL_NAME`、`AGENT_MODEL_KEY`。`.env.example` 仅作为说明，不会自动加载。
 
 远程部署由宿主提供 TLS、身份认证和权限域隔离，不应直接把演示端口暴露到公网。Tauri 本地版本不需要运行这个服务。
 
@@ -133,9 +148,13 @@ node --test packages/client/test/*.test.mjs
 - [内容与模型协议](docs/CONTENT-AND-PROVIDERS.zh-CN.md)
 - [可等待检查点](docs/CHECKPOINTS.zh-CN.md)
 - [v0.2 → v0.3 迁移](docs/MIGRATION-0.3.zh-CN.md)
+- [Rust Plugin API 6 迁移](docs/MIGRATION-API-6.zh-CN.md)
+- [Rust Plugin API 7 与上下文存储迁移](docs/MIGRATION-API-7.zh-CN.md)
 - [公共流式协议与 Codex 借鉴边界](docs/STREAMING-PROTOCOL.zh-CN.md)
 - [统一应用接口](docs/APPLICATION-API.zh-CN.md)
+- [本地会话与重启恢复](docs/LOCAL-SESSIONS.zh-CN.md)
 - [Tauri / HTTP 接入指南](docs/BRIDGES.zh-CN.md)
+- [Agent 能力装配与管理](docs/CAPABILITY-ASSEMBLY.zh-CN.md)
 - [JavaScript 客户端](packages/client/README.md)
 - [v0.1 → v0.2 迁移](docs/MIGRATION-0.2.zh-CN.md)
 - [长期设计方案](docs/DESIGN-NOTES.zh-CN.md)

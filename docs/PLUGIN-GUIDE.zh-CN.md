@@ -10,7 +10,7 @@ Plugin 是组件接入 Runtime 的一种方式，不是所有组件的必需形�
 
 `Plugin` 包含三个方法：`manifest`、异步 `install`、异步 `shutdown`。
 
-Manifest 指定 id、api_version、requires、provides。requires/provides 是服务键，不是类名和文件路径。当前公共 API 协议号为 3；它与包版本 0.3.0 不是同一个值。包在 1.0 前仍可能调整 Rust 接口。
+Manifest 指定 id、api_version、requires、provides。requires/provides 是服务键，不是类名和文件路径。当前公共 API 协议号为 7；它与包版本 0.3.0 不是同一个值。包在 1.0 前仍可能调整 Rust 接口。
 
 安装流程：
 
@@ -32,12 +32,14 @@ Manifest 指定 id、api_version、requires、provides。requires/provides 是�
 |---|---|---|
 | `publish` | `ServiceRegistration` | 发布类型检查的服务 |
 | `tool` | `Tool` | 注册并冻结工具与 Schema |
-| `context_transform` | `ContextTransform` | 串行生成本轮模型消息投影 |
+| `context_transform` | `ContextTransform` | 先收集有来源的 `sources` 并计入预算，再串行生成真实历史的模型投影 |
 | `result_transform` | `ResultTransform` | 工具结束后处理输出，不得篡改状态 |
 | `policy` | `ToolPolicy` | 工具执行前的权限否决 |
 | `observer` | `EventObserver` | 非关键实时观察 |
 | `tool_selector` | `ToolSelector` | 在Run上限内选择本轮工具，同轮只能继续收紧 |
 | `checkpoint_sink` | `CheckpointSink` | 安装一个可等待的执行记录提交实现，不是UI观察器 |
+
+API 7 的目录、规则、记忆等注入组件应通过 `ContextTransform::sources` 返回唯一来源的 `ContextBlock`，普通 `transform` 处理真实对话。不要两处重复注入，或把来源伪装为最后一个用户请求。压缩策略仍属于独立组件，执行器只处理预算、时序与校验。新增 RunContext 字段和可选计量接口见 [API 7 迁移](MIGRATION-API-7.zh-CN.md)。
 
 ### 模型服务
 
@@ -69,15 +71,23 @@ ToolSpec 描述名称、用途、参数 Schema、并发模式与 side_effects。
 
 side_effects 不是沙箱权限推导，Core 信任插件的声明。宿主默认拒绝副作用工具；注册工具不等于授权工具。
 
+核心层的 `max_history_bytes` 独立约束累计历史。工具派发前预留其允许最大结果的序列化上界；预算压力可能降低实际并行度或使未启动项 Skipped，但不删减已确认的执行记录。已启动工具仍按现有结果上限、取消和期限结算；详情见 [Runtime](../packages/runtime/README.md#历史容量与结果结算)。
+
 ## 5. 上下文变换
 
 输入是已拥有的一份消息投影；返回新的投影。可以检索、注入或裁剪，但不能返回未配对的工具消息。
+
+`ToolSelector` 先从已结算正式历史选出本轮工具，随后才调用来源与投影。此时 `RunContext.request_tools` 与 `allowed_tools` 是本轮已选集合，请求开销包含该集合和已收集来源，不再预留所有注册工具的 Schema。`model_request` 构造与主请求一致的计量对象；网关仍对实际序列化请求执行硬限制。选择期间以 `available` 为候选集合。上下文工作仍受 `context_timeout`、任务期限及取消控制；错误恢复复用同轮声明与来源。
+
+`recover_context` 默认返回 `None`。只有能在供应商确认上下文超限后安全缩小投影的组件才应覆盖；Runtime 最多调用一次，并要求结果严格变小且保持消息/工具配对。该入口不能执行工具、放宽权限或启动另一套 Agent 循环。
 
 不要通过保存 ContextTransform 的私有全局变量把不同用户的运行混在一起。需要共享数据时明确放到 Host/Agent 级后端；当前任务临时信息放在 RunContext 或调用栈中。
 
 消息会在每次变换后校验，最终规范化请求会进入 RequestAudit。该操作失败会停止当前运行，不会“悄悄忽略记忆检索异常后假装结果完整”。
 
 ## 6. 结果变换
+
+`ContextTransform::finish(run_id)` 与 `ResultTransform::finish(run_id)` 用于释放单个 Run 的资源，默认空实现。执行器在工具结算之后、终态检查点及报告发布之前等待它们；每项使用独立于任务取消的 `hook_timeout`。一个收尾失败不阻止其余收尾，错误进入最终报告，不重做任何工具。缓存、活动归档等可靠收尾不能只依赖 `EventObserver`；直接调用变换器的宿主应遵守同样的调用顺序。
 
 ResultTransform 可以对长工具输出归档、筛选、压缩或增加 ArtifactRef。它不能改变 call_id、ToolStatus；原始长度和已截断标记也不能被悄悄降低。
 
@@ -87,9 +97,9 @@ ResultTransform 可以对长工具输出归档、筛选、压缩或增加 Artifa
 
 ## 7. 权限否决
 
-ToolPolicy 返回 Allow 或 Deny。所有策略是“共同收紧”，不是“后面的 Allow 覆盖前面的 Deny”。异常会阻止批次实际执行。
+ToolPolicy 返回 Allow 或 Deny，多个策略共同收紧。静态参数与不可变宿主授权先预检；动态策略在该工具 intent 确认之后、实际派发之前检查一次。前一个独占工具修改规则后，同批后续调用也必须使用当前状态。拒绝和策略异常不会进入对应工具函数；异常停止尚未派发的队列，不撤销之前已完成的动作。
 
-策略之后仍有宿主最终检查。ToolPolicy 不能改参数，避免参数获批后又被其它插件改成另一种操作。
+ToolPolicy 不修改参数，也不能放宽宿主授权。检查、取消与结果结算沿用现有预算和确认屏障；它不是跨 Run 或外部文件系统的原子事务。
 
 需要人工审批时，在该接口等待业务审批结果并响应取消。审批 UI、用户身份鉴别、审计落库都属于宿主应用；本版没有默认审批服务器。
 
@@ -137,7 +147,7 @@ Memory/Planner示例生产依赖仍只有API，不需要HTTP或Tauri依赖。Pla
 
 Tool.execute返回Result<ToolOutput>；纯文本可用.into()包装。is_error表达已知业务错误，不能让Runtime把“错误字符串”当成功。多模态与structured可作为模型观察，UI采用独立预览；详情显式发布且必须脱敏。
 
-ToolSelector拿到只读RunContext、step、当前投影和available，返回名字。不能增加未注册/被上一选择器排除的工具；无重复名；异常/超时停止执行。该接口不发布工具，不修改Schema，不替代权限。
+ToolSelector 拿到只读 RunContext、step、已结算正式历史和 available，在来源收集与压缩之前执行，每轮一次。不能增加未注册或被前一选择器排除的工具；重复名、异常和超时停止执行。该接口不发布工具、不修改 Schema、不替代权限；不得依赖压缩结果反复选取。
 
 CheckpointSink在Host级安装、按Run并发隔离，由Core等待每次commit；必须支持取消、幂等和自己的耐久性承诺。它不接收可修改Runtime，不调用工具或开启另一个Agent循环。详见[检查点协议](CHECKPOINTS.zh-CN.md)。
 

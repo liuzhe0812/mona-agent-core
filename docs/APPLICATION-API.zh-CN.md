@@ -57,3 +57,9 @@ ApplicationConfig现在还可提供可信model_options和allowed_tools，构造�
 Rust调用方可以直接构造多模态RunRequest。默认HTTP/Tauri桥接不顺手增加任意文件读取/图片URL上传功能；需要资源输入的产品应在可信应用层验证附件并构造请求。UI流式协议仍是2，私有协议数据和检查点不在公共响应中。
 
 配置了CheckpointSink时，追加输入applied还要等该次检查点确认；没有sink时语义仍是加入内存运行记录。无论哪种，都不表示模型已执行这个要求。
+
+## 8. 可信宿主继续历史
+
+`start_task_with_history(StartRequest, Vec<Message>, metadata)` 是 Rust 可信入口，不是公共 HTTP/Tauri 新请求字段。宿主提供已经验证的正式历史和逻辑上下文身份；Application 使用当前系统提示词、模型和权限配置，将新 prompt 追加为新的 Run。历史 System 消息不覆盖当前宿主指令，历史大小和工具配对仍由 Runtime 校验。
+
+同一 key 的 prompt 或 metadata 变化会冲突；宿主负责确保逻辑 key 对应不可变的历史身份，Application 不为重复比对再复制一份历史。内存 TTL/forget 语义不变。跨重启会话、revision、持久请求去重与文件锁由 `apps/server/sessions` 实现，见[本地会话](LOCAL-SESSIONS.zh-CN.md)。调用会话接口保存的历史不受内存 Run 过期影响，通用 `/v1/runs` 仍明确是临时任务入口。

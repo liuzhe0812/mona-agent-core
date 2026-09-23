@@ -4,7 +4,9 @@
 
 | App | Responsibility |
 |---|---|
-| `server` | HTTP service composition root that assembles the runtime, application layer, bridges and optional model management |
-| `web` | Formal framework-free Web UI for task interaction and settings |
+| [server](server/README.md) | HTTP composition root: capability policy, package assembly, management interfaces and workspace-scoped local conversations |
+| [web](web/README.md) | Formal framework-free UI for task interaction, persisted conversation navigation and settings |
+
+The Web application's visual contract is maintained in [UI design](../docs/ui/DESIGN.zh-CN.md), [component contracts](../docs/ui/COMPONENTS.zh-CN.md), [design governance](../docs/ui/DESIGN-GOVERNANCE.zh-CN.md), and the [production surface inventory](../docs/ui/DESIGN-INVENTORY.zh-CN.md).
 
 `examples/` is separate and contains runnable integration or composition samples. Examples help validate how packages are assembled; they are not automatically part of the formal application or its production dependency set.

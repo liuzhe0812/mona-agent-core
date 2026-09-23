@@ -2,7 +2,7 @@
 
 ## 1. 三个版本分开
 
-包版本0.3.0；Rust插件API_VERSION=3；UI STREAM_VERSION仍为2；新检查点CHECKPOINT_VERSION=1。
+本页记录 0.3 首次交付时的 Rust 插件 API_VERSION=3；当前同一预 1.0 包线已升级到 API_VERSION=6。API 4 的上下文预算字段见 [Rust 插件 API 4 迁移](MIGRATION-API-4.zh-CN.md)，API 5 的工具可见性字段见 [Rust 插件 API 5 迁移](MIGRATION-API-5.zh-CN.md)，API 6 的可靠性接口见 [Rust 插件 API 6 迁移](MIGRATION-API-6.zh-CN.md)。UI STREAM_VERSION仍为2；检查点CHECKPOINT_VERSION=1。
 
 这是Rust源码接口的破坏性升级，需重新构建插件/组合根；不是动态ABI兼容发行。已有HTTP/SSE与Tauri Channel客户端的帧结构不变，不因Rust API升级而要求UI改成protocol_version=3。
 

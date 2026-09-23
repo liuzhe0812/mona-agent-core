@@ -37,3 +37,27 @@ Pi/DSH参考沿用前版设计讨论；本次重点核对Codex/Tauri/Axum文档�
   - 参考执行检查点与跨任务存储的分离；本项目只实现提交边界，不实现LangGraph式完整持久化/恢复系统。
 
 这些是同类需求的参考，不是通用Agent的强制行业标准。实现语义与上游并不完全一致；代码仍以本包测试和文档为准。源代码参考链接不证明Rust构建已通过。
+
+## 2026-09-23 本地会话
+
+- Pi 会话格式：https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/session-format.md
+- Pi SessionManager：https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/core/session-manager.ts
+  - 参考工作目录分组、持久会话身份与打开/继续语义；不移植分支树、不承诺文件兼容。
+- DSH 持久化后端：https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/session/session-persistence-jsonl/README.md
+- DSH 检查点策略：https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/session/session-checkpoint-policy/README.md
+  - 参考持久化与执行确认分工、单写者和失败关闭；本项目复用现有同步确认的完整 RunCheckpoint，不复制整套事件存储框架。
+
+实现与上游差异、实际测试入口见[本地会话](LOCAL-SESSIONS.zh-CN.md)。
+
+## 2026-09-23 上下文修复
+
+- Pi Compaction：https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/compaction.md
+  - 参考摘要和覆盖边界持久化、摘要加近期消息重建以及整组工具边界保护。
+- DSH Token Meter：https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/llm/token-meter/README.md
+  - 参考请求/路由限定的计量复用、计量不执行模型与不决定循环。
+- DSH Compaction：https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/compaction/compaction/README.md
+  - 参考持久替换与源范围核验，保留原始事实；不移植完整事件框架。
+- DSH Agent Instructions：https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/context/agent-instructions/README.md
+  - 参考有界适用目录规则、文件操作发现与恢复校对；本实现明确采用 AGENTS 优先/CLAUDE 回退，不自动读取工作空间外规则，也不悄悄裁切规则。
+
+Pi 文档已直接读取；DSH 使用可获取的官方仓库文档和官方仓库检索内容，部分 Raw 页面直连不可用。独立实现及验证边界见[上下文管理](CONTEXT-MANAGEMENT.zh-CN.md)。

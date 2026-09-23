@@ -2,7 +2,8 @@
 
 ## 0.3.0 · 通用能力契约（源码候选版）
 
-- API_VERSION=3；UI STREAM_VERSION保留2；检查点协议1。
+- API_VERSION=6；增加结构化模型故障、默认关闭的有限重试、模型窗口提示、上下文溢出恢复、审计模式和独立工具执行上限；UI STREAM_VERSION保留2；检查点协议1。
+- 新增独立 `tools` 包；正式 Server 固定装配 `read/shell/edit/write`，可选启用 `grep/find/ls`。`shell` 在 Windows 默认使用 PowerShell，在 Unix 使用 Bash 或 sh；Core API 不因解释器选择而变化。Skills 改为摘要目录并通过 `read` 加载，Spill 在正式宿主中也复用 `read`。
 - Content和ToolOutput：文本/图片/资源描述、structured与is_error，富结果超限明确失败。
 - Run工具上限和ToolSelector：逐轮可见工具选择，执行集合核对，仍保留冻结注册表与最终权限。
 - 可选CheckpointSink：串行不可变快照、派发前intent、部分结果、终态确认，失败不盲目重试。
