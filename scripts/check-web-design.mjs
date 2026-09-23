@@ -5,14 +5,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
-const FEATURE_CSS = ['apps/web/styles.css', 'apps/web/sessions.css', 'apps/web/appearance.css'];
+const FEATURE_CSS = ['apps/web/styles.css', 'apps/web/sessions.css', 'apps/web/appearance.css', 'apps/web/workspace.css'];
 const OWNERSHIP_ROOTS = ['apps/web', 'docs/ui'];
 const OWNERSHIP_TEXT_EXTENSIONS = new Set(['.css', '.html', '.js', '.json', '.md', '.mjs', '.toml', '.ts', '.txt', '.yaml', '.yml']);
 const LEGACY_EXTERNAL_NAME = ['cin', 'dy'].join('');
 const RUNTIME_JS = [
   'apps/web/app.mjs', 'apps/web/appearance.mjs', 'apps/web/theme.mjs',
   'apps/web/run-view.mjs', 'apps/web/content-renderer.mjs', 'apps/web/sessions-ui.mjs', 'apps/web/tooltip.mjs',
-  'apps/web/conversation-rail.mjs',
+  'apps/web/conversation-rail.mjs', 'apps/web/workspace-ui.mjs',
 ];
 const REQUIRED_DECLARATIONS = Object.freeze({
   '--ui-control-sm': '32px', '--ui-control-md': '36px', '--ui-control-lg': '40px',

@@ -1,0 +1,51 @@
+/* Workspace surfaces use the Mona design tokens; project organization is optional. */
+.projects-region { min-height: 0; max-height: 30%; display: flex; flex-direction: column; margin-top: var(--ui-space-3); }
+.projects-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--ui-space-3); min-height: var(--ui-control-sm); color: var(--text-secondary); font-size: var(--ui-text-12); }
+.projects-heading strong { font-weight: var(--ui-weight-medium); }
+#project-list { overflow: auto; }
+.project-item { display: flex; min-width: 0; align-items: center; border-radius: var(--ui-radius-inner); }
+.project-row { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--ui-space-2); min-height: var(--ui-control-md); border: 0; padding: var(--ui-space-1) var(--ui-space-3); background: transparent; color: var(--text-primary); text-align: left; font-size: var(--ui-text-13); border-radius: var(--ui-radius-inner); }
+.project-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-row[aria-pressed='true'] { background: var(--surface-selected); }
+.project-row:hover, .project-row:focus-visible, .file-entry:hover, .file-entry:focus-visible { background: var(--surface-hover); }
+.project-remove { opacity: 0; }
+.project-item:hover .project-remove, .project-item:focus-within .project-remove { opacity: 1; }
+#projects-notice { margin: var(--ui-space-1) var(--ui-space-3); color: var(--status-danger); font-size: var(--ui-text-11); }
+#projects-notice:empty { display: none; }
+.workspace-empty { padding: var(--ui-space-2) var(--ui-space-3); margin: 0; color: var(--text-secondary); font-size: var(--ui-text-12); }
+#project-context { min-height: var(--ui-control-sm); padding: 0 var(--ui-space-4); color: var(--text-secondary); font-size: var(--ui-text-12); }
+#project-context:empty { display: none; }
+.files-panel { min-width: 0; width: var(--ui-files-width); flex: 0 0 var(--ui-files-width); margin-left: var(--ui-space-2); overflow: hidden; display: flex; flex-direction: column; border: var(--ui-border) solid var(--border-default); border-radius: var(--ui-radius-container); background: var(--surface); }
+.files-panel-header { height: var(--ui-topbar-height); flex-shrink: 0; display: flex; align-items: center; gap: var(--ui-space-1); padding: 0 var(--ui-space-3); border-bottom: var(--ui-border) solid var(--border-default); }
+.files-panel-header strong { flex: 1; font-size: var(--ui-text-13); font-weight: var(--ui-weight-medium); }
+#workspace-path { margin: 0; padding: var(--ui-space-2) var(--ui-space-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-secondary); font-size: var(--ui-text-11); }
+.files-location { display: flex; align-items: center; min-width: 0; gap: var(--ui-space-1); padding: 0 var(--ui-space-2); }
+#files-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ui-text-12); color: var(--text-secondary); }
+#files-tree { min-height: 0; overflow: auto; padding: var(--ui-space-1) var(--ui-space-2); flex: 1; }
+.files-panel:has(#file-preview:not([hidden])) #files-tree { flex: 0 1 35%; min-height: var(--ui-control-lg); }
+.file-entry { display: flex; width: 100%; min-height: var(--ui-control-sm); align-items: center; gap: var(--ui-space-2); padding: var(--ui-space-1) var(--ui-space-2); border: 0; border-radius: var(--ui-radius-inner); color: var(--text-primary); background: transparent; text-align: left; font-size: var(--ui-text-12); }
+.file-entry-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-entry small { flex: 0 0 auto; font-size: var(--ui-text-10); color: var(--text-tertiary); }
+.file-entry .line-icon, .file-type-icon { width: var(--ui-text-16); height: var(--ui-text-16); flex: 0 0 auto; text-align: center; }
+#files-notice { margin: var(--ui-space-2) var(--ui-space-3); font-size: var(--ui-text-12); color: var(--text-secondary); overflow-wrap: anywhere; }
+#files-notice:empty { display: none; }
+#file-preview { min-height: 0; flex: 1; display: flex; flex-direction: column; border-top: var(--ui-border) solid var(--border-default); }
+.file-preview-header { display: flex; align-items: center; min-height: var(--ui-control-md); gap: var(--ui-space-2); padding: 0 var(--ui-space-3); }
+#file-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ui-text-12); font-weight: var(--ui-weight-medium); }
+#file-meta { margin: 0 var(--ui-space-3) var(--ui-space-2); font-size: var(--ui-text-11); color: var(--text-secondary); overflow-wrap: anywhere; }
+#file-content { overflow: auto; min-height: 0; flex: 1; padding: var(--ui-space-2) var(--ui-space-3); background: var(--surface-elevated); }
+.workspace-file-text { margin: 0; white-space: pre; font-family: var(--ui-font-code); font-size: var(--ui-text-12); line-height: var(--ui-line-body); tab-size: 4; }
+#file-content img { max-width: 100%; height: auto; object-fit: contain; }
+#workspace-root-form { max-width: var(--ui-settings-reading-max); }
+#workspace-root-form label { display: block; margin-bottom: var(--ui-space-2); font-size: var(--ui-text-13); }
+.workspace-root-controls { display: flex; gap: var(--ui-space-2); }
+#workspace-root { min-width: 0; flex: 1; }
+.workspace-settings-copy { margin-top: var(--ui-space-3); color: var(--text-secondary); font-size: var(--ui-text-12); line-height: var(--ui-line-body); }
+.files-scrim { position: fixed; inset: 0; z-index: 7; border: 0; background: var(--overlay-modal); }
+@media (max-width: 1180px) {
+  .files-panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 8; width: min(var(--ui-files-overlay-width), 100vw); margin: 0; border-radius: var(--ui-radius-none); }
+}
+@media (max-width: 680px) {
+  .workspace-root-controls { flex-direction: column; }
+  .project-remove { opacity: 1; }
+}

@@ -110,6 +110,8 @@
   --ui-tool-command-max-height: 132px;
   --ui-tool-result-max-height: 320px;
   --ui-provider-sidebar-width: 240px;
+  --ui-files-width: 340px;
+  --ui-files-overlay-width: 420px;
   --ui-provider-logo-size: var(--ui-control-md);
   --ui-switch-width: 40px;
   --ui-switch-height: 24px;

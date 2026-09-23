@@ -10,15 +10,20 @@
   <link rel="stylesheet" href="/apps/web/styles.css">
   <link rel="stylesheet" href="/apps/web/sessions.css">
   <link rel="stylesheet" href="/apps/web/appearance.css">
+  <link rel="stylesheet" href="/apps/web/workspace.css">
 </head>
 <body>
   <div class="shell">
     <aside id="chat-sidebar" class="sidebar" aria-label="任务导航">
       <div class="brand"><span class="brand-mark">M</span><strong>Mona</strong><button id="search-button" class="icon-button" type="button" aria-label="搜索任务" aria-keyshortcuts="Control+K" aria-haspopup="dialog" aria-expanded="false"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg></button></div>
       <button id="new-chat" class="nav" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a9 9 0 0 1-9 9H4l-2 2v-11a9 9 0 0 1 19 0ZM8 11h8m-4-4v8"/></svg>新建任务<kbd>Ctrl N</kbd></button>
+      <section id="projects-region" class="projects-region" aria-label="项目" hidden>
+        <div class="projects-heading"><strong>项目</strong><button id="project-add" class="icon-button" type="button" aria-label="添加项目" data-tooltip="添加项目">＋</button></div>
+        <div id="project-list"></div><p id="projects-notice" role="status"></p>
+      </section>
       <div class="sessions-region">
         <div class="sessions-heading">
-          <button id="sessions-collapse" class="sessions-label" type="button" aria-expanded="true" aria-controls="sessions-list"><span>任务</span><svg class="line-icon chevron-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+          <button id="sessions-collapse" class="sessions-label" type="button" aria-expanded="true" aria-controls="sessions-list"><span id="sessions-section-title">任务</span><svg class="line-icon chevron-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
           <div class="sessions-heading-actions">
             <button id="sessions-options" class="icon-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="sessions-options-menu" aria-label="任务列表操作" data-tooltip="任务列表操作"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg></button>
             <button id="sessions-new" class="icon-button" type="button" aria-label="新建任务" data-tooltip="新建任务"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11.5 4.5h8v15h-15v-15h4"/><path d="M15.5 3.5 20 8l-8.5 8.5H7v-4.5z"/></svg></button>
@@ -36,6 +41,7 @@
     <section id="chat-workspace" class="workspace">
       <header class="topbar">
         <div class="thread-heading"><button id="sidebar-toggle" class="icon-button" type="button" aria-label="切换侧栏" aria-controls="chat-sidebar" aria-expanded="true"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button><strong id="thread-title">新任务</strong></div>
+        <button id="files-toggle" class="icon-button" type="button" aria-label="工作区文件" aria-controls="files-panel" aria-expanded="false" data-tooltip="工作区文件" hidden><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
       </header>
 
       <nav id="conversation-rail" class="conversation-rail" aria-label="会话轮次导航" hidden>
@@ -60,6 +66,7 @@
 
       <footer class="composer-wrap">
         <div class="composer">
+          <p id="project-context"></p>
           <textarea id="prompt" rows="3" aria-label="任务内容" placeholder="描述你希望完成的任务…"></textarea>
           <div class="composer-row">
             <div class="composer-actions">
@@ -73,6 +80,16 @@
       </footer>
     </section>
 
+    <button id="files-scrim" class="files-scrim" type="button" aria-label="关闭工作区文件" hidden></button>
+    <aside id="files-panel" class="files-panel" role="complementary" aria-label="工作区文件" hidden>
+      <header class="files-panel-header"><strong>文件</strong><button id="files-refresh" class="icon-button" type="button" aria-label="刷新文件" data-tooltip="刷新文件">↻</button><button id="files-close" class="icon-button" type="button" aria-label="收起文件栏" data-tooltip="收起文件栏">×</button></header>
+      <p id="workspace-path"></p>
+      <div class="files-location"><button id="files-parent" class="icon-button" type="button" aria-label="上一级目录" data-tooltip="上一级目录" disabled>↑</button><span id="files-current">/</span></div>
+      <div id="files-tree" aria-label="目录文件"></div><button id="files-more" class="text-button" type="button" hidden>加载更多文件</button>
+      <p id="files-notice" role="status"></p>
+      <section id="file-preview" aria-label="文件预览" hidden><header class="file-preview-header"><strong id="file-title"></strong><button id="file-back" class="icon-button" type="button" aria-label="关闭预览" data-tooltip="关闭预览">×</button></header><p id="file-meta" role="status"></p><div id="file-content"></div><button id="file-more" class="text-button" type="button" hidden>读取下一页</button></section>
+    </aside>
+
     <section id="settings-page" class="settings-page" aria-label="设置" hidden>
       <aside class="settings-sidebar">
         <button id="settings-back" class="settings-back" type="button"><span aria-hidden="true">‹</span> 返回对话</button>
@@ -81,6 +98,7 @@
           <button id="settings-components-tab" class="active" type="button" aria-current="page"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9Z"/><path d="m8 10 4 2 4-2M12 12v5"/></svg>Agent 组件</button>
           <button id="settings-tools-tab" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5-5L7 4l3 3 2.7-2.7a4 4 0 0 0 5 5L9 18a2.1 2.1 0 0 1-3 0 2.1 2.1 0 0 1 0-3Z"/></svg>Agent 工具</button>
           <button id="settings-models-tab" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4"/></svg>模型设置</button>
+          <button id="settings-workspace-tab" type="button" aria-controls="workspace-settings-section"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v12H3Z"/></svg>工作区</button>
           <button id="settings-appearance-tab" type="button" aria-controls="appearance-settings-section"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-3.7 1.5 1.5 0 0 1 1-2.6h2a4 4 0 0 0 4-4A8.5 8.5 0 0 0 12 3Z"/><circle cx="7" cy="10" r=".7"/><circle cx="11" cy="7" r=".7"/><circle cx="16" cy="8" r=".7"/></svg>外观</button>
         </nav>
       </aside>
@@ -99,6 +117,11 @@
         </header>
         <p id="tools-notice" class="settings-notice" role="status" aria-live="polite"></p>
         <div id="tool-list" class="capability-list"></div>
+      </main>
+      <main id="workspace-settings-section" class="settings-content" hidden>
+        <header class="settings-heading"><div><h2>工作区</h2></div><button id="workspace-settings-refresh" class="text-button" type="button">刷新</button></header>
+        <p id="workspace-notice" class="settings-notice" role="status"></p>
+        <form id="workspace-root-form"><label for="workspace-root">默认工作区根目录</label><div class="workspace-root-controls"><input id="workspace-root" type="text" autocomplete="off" spellcheck="false" required disabled><button id="workspace-root-save" class="secondary" type="submit" disabled>保存</button></div><p class="workspace-settings-copy">普通会话在此目录下各自创建工作文件夹。修改后只影响新会话，已有文件和会话目录保持不变。</p></form>
       </main>
       <main id="model-settings-section" class="settings-content" hidden>
         <header class="settings-heading">
@@ -238,6 +261,14 @@
       <div id="model-picker-list" class="model-picker-list"></div>
       <p id="model-picker-error" class="error" role="alert"></p>
       <div class="dialog-actions"><button id="open-model-settings" class="secondary" value="cancel" type="submit">管理模型</button><button value="cancel" class="secondary" type="submit">关闭</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="project-dialog" aria-labelledby="project-dialog-title">
+    <form id="project-form"><div class="dialog-head"><h2 id="project-dialog-title">添加项目</h2></div>
+      <label>项目目录<input id="project-path" type="text" placeholder="宿主上的绝对目录路径" autocomplete="off" spellcheck="false" required></label>
+      <label>项目名称<input id="project-name" type="text" maxlength="80" required></label>
+      <p id="project-error" class="error" role="alert"></p><div class="dialog-actions"><button id="project-cancel" class="secondary" type="button">取消</button><button id="project-save" class="primary" type="submit">添加</button></div>
     </form>
   </dialog>
 

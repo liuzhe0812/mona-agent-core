@@ -11,7 +11,7 @@ use axum::{
     middleware::{self, Next}, response::{IntoResponse, Response}, routing::{get, post}, Json, Router,
 };
 use serde::Deserialize;
-use std::{path::{Path as FsPath, PathBuf}, sync::Arc};
+use std::{path::Path as FsPath, sync::Arc};
 use subtle::ConstantTimeEq;
 use tower_http::cors::CorsLayer;
 
@@ -22,22 +22,16 @@ async fn disk<T: Send + 'static>(action: impl FnOnce() -> SessionResult<T> + Sen
 }
 
 pub fn from_environment(workspace: &FsPath, demo: bool) -> SessionResult<Arc<Store>> {
-    let base = match std::env::var_os("AGENT_SESSIONS_DIR") {
-        Some(value) if !value.is_empty() => PathBuf::from(value),
-        Some(_) => return Err(SessionError::new(SessionErrorCode::InvalidRequest, "AGENT_SESSIONS_DIR 不能为空。")),
-        None => std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("XDG_STATE_HOME"))
-            .map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".local/state")))
-            .ok_or_else(|| SessionError::new(SessionErrorCode::InvalidRequest, "请为此宿主设置 AGENT_SESSIONS_DIR。"))?
-            .join("mona-agent-core").join(if demo { "demo-sessions" } else { "sessions" }),
-    };
+    let base = crate::workspace_setup::session_base(demo)
+        .map_err(|e| SessionError::new(SessionErrorCode::InvalidRequest,e.message))?;
     Store::open(&base, workspace)
 }
 
 #[derive(Clone)]
-struct Service { store: Arc<Store>, tasks: SessionApplication }
+struct Service { store: Arc<Store>, tasks: SessionApplication, workspaces: Option<Arc<crate::workspace_routes::Service>> }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Create { request_id: String }
+struct Create { request_id: String, project_id: Option<String> }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Rename { revision: u64, title: String }
@@ -49,13 +43,19 @@ struct Revision { revision: u64 }
 struct Flag { revision: u64, value: bool }
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ListQuery { offset: Option<usize>, limit: Option<usize>, q: Option<String>, archived: Option<bool> }
+struct ListQuery { offset: Option<usize>, limit: Option<usize>, q: Option<String>, archived: Option<bool>, project_id: Option<String> }
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PageQuery { before: Option<usize>, limit: Option<usize> }
 struct Auth(String);
 struct HttpError(ApplicationError);
 impl From<ApplicationError> for HttpError { fn from(e: ApplicationError) -> Self { Self(e) } }
+impl From<workspace::Error> for HttpError {
+    fn from(e: workspace::Error) -> Self {
+        let code = match e.code.as_str() { "conflict"=>Code::Conflict,"not_found"=>Code::NotFound,"capacity"=>Code::Capacity,"io"=>Code::Internal,_=>Code::InvalidRequest };
+        Self(error(code,&e.message))
+    }
+}
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = match self.0.code {
@@ -81,7 +81,7 @@ async fn authenticate(State(auth): State<Arc<Auth>>, request: Request, next: Nex
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")); response
 }
-pub fn router(store: Arc<Store>, app: AgentApplication, token: String, origin: Option<String>) -> std::result::Result<Router, Box<dyn std::error::Error>> {
+pub fn router(store: Arc<Store>, app: AgentApplication, token: String, origin: Option<String>, workspaces: Option<Arc<crate::workspace_routes::Service>>) -> std::result::Result<Router, Box<dyn std::error::Error>> {
     if !(32..=512).contains(&token.len()) || !token.bytes().all(|b| b.is_ascii_graphic()) { return Err("invalid session bearer token".into()); }
     let mut cors = CorsLayer::new().allow_methods([Method::GET, Method::POST]).allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     if let Some(origin) = origin {
@@ -98,17 +98,32 @@ pub fn router(store: Arc<Store>, app: AgentApplication, token: String, origin: O
         .route("/api/sessions/{id}/archive", post(archive))
         .route("/api/sessions/{id}/unread", post(unread))
         .route("/api/sessions/{id}/delete", post(delete))
-        .with_state(Service { tasks: SessionApplication::new(store.clone(), app), store })
+        .with_state(Service { tasks: SessionApplication::new(store.clone(), app), store, workspaces })
         .layer(DefaultBodyLimit::max(128 * 1024))
         .layer(middleware::from_fn_with_state(Arc::new(Auth(token)), authenticate)).layer(cors))
 }
 async fn list(State(s): State<Service>, q: std::result::Result<Query<ListQuery>, axum::extract::rejection::QueryRejection>) -> std::result::Result<Json<Listing>, HttpError> {
     let q = query(q)?;
     let archived = q.archived.unwrap_or(false);
-    Ok(Json(disk(move || s.store.list(q.offset.unwrap_or(0), q.limit.unwrap_or(50), q.q.as_deref().unwrap_or(""), archived)).await?))
+    let project_ids = s.workspaces.as_ref().map(|w| w.project_ids()).transpose()?.unwrap_or_default();
+    Ok(Json(disk(move || s.store.list_matching(q.offset.unwrap_or(0), q.limit.unwrap_or(50), q.q.as_deref().unwrap_or(""), archived, |h| {
+        match q.project_id.as_deref() {
+            None => true,
+            Some("") => h.metadata.get("project.id").is_none_or(|id| !project_ids.contains(id)),
+            Some(id) => h.metadata.get("project.id").is_some_and(|v| v == id),
+        }
+    })).await?))
 }
 async fn create(State(s): State<Service>, value: std::result::Result<Json<Create>, JsonRejection>) -> std::result::Result<Json<Header>, HttpError> {
-    let value = body(value)?; Ok(Json(disk(move || s.store.create(&value.request_id)).await?))
+    let value = body(value)?;
+    if let Some(workspaces) = s.workspaces {
+        let header = tokio::task::spawn_blocking(move || workspaces.create(&value.request_id,value.project_id.as_deref()))
+            .await.map_err(|_| error(Code::Internal,"会话创建结果未知，请刷新确认。"))??;
+        Ok(Json(header))
+    } else {
+        if value.project_id.is_some() { return Err(error(Code::InvalidRequest,"当前宿主未装配项目管理。").into()); }
+        Ok(Json(disk(move || s.store.create(&value.request_id)).await?))
+    }
 }
 async fn detail(State(s): State<Service>, Path(id): Path<String>, q: std::result::Result<Query<PageQuery>, axum::extract::rejection::QueryRejection>) -> std::result::Result<Json<view::SessionPage>, HttpError> {
     let q = query(q)?; Ok(Json(disk(move || view::session_page(s.store.get(&id)?, q.before, q.limit.unwrap_or(20))).await?))
@@ -118,7 +133,9 @@ async fn turn_detail(State(s): State<Service>, Path((id, turn)): Path<(String,St
 }
 async fn start(State(s): State<Service>, Path(id): Path<String>, value: std::result::Result<Json<NewTurn>, JsonRejection>) -> std::result::Result<Json<TurnResponse>, HttpError> {
     let value = body(value)?;
-    Ok(Json(s.tasks.start_turn(id, value).await?))
+    if let Some(w) = s.workspaces {
+        Ok(Json(w.environments.start(w.settings.clone(),s.tasks,id,value).await?))
+    } else { Ok(Json(s.tasks.start_turn(id, value).await?)) }
 }
 async fn rename(State(s): State<Service>, Path(id): Path<String>, value: std::result::Result<Json<Rename>, JsonRejection>) -> std::result::Result<Json<Header>, HttpError> {
     let value = body(value)?; Ok(Json(disk(move || s.store.rename(&id, value.revision, &value.title)).await?))

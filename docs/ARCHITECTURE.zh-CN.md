@@ -14,6 +14,8 @@ api + providers ← models
 api ← skills
 api ← instructions
 api + 可选 compaction ← sessions
+基础文件库 ← workspace
+workspace ← projects（可选）
 api ← compaction
 api ← spill
 api ← Memory / Planner 组件
@@ -52,7 +54,9 @@ Runtime 的职责仍是插件宿主、ReAct、模型网关、工具执行、上�
 - 订阅数量、已完成任务 TTL、关闭接入与任务排空。
 - 不向不可信界面暴露 raw RunReport、系统提示词、原始请求审计和 provider 推理协议字段。
 
-一个 Application 实例对应一个可信权限域，不实现用户账户、多租户认证、workspace 锁或 Session 数据库。`sessions` 扩展提供工作空间隔离的持久会话及本地写者锁，Application 的可选会话适配连接现有 Run 注册表，Server 装配并提供管理接口，见 [本地会话](LOCAL-SESSIONS.zh-CN.md)。不同权限域仍应使用独立的应用实例及 Host/Memory；不能在 prompt 里写 tenant_id 就认为已经隔离。
+一个 Application 实例对应一个可信权限域，不实现用户账户、多租户认证、workspace 锁或 Session 数据库。`sessions` 扩展提供宿主状态目录中的持久会话、每会话 cwd 绑定及本地写者锁，Application 的可选会话适配连接现有 Run 注册表，Server 装配并提供管理接口，见 [本地会话](LOCAL-SESSIONS.zh-CN.md)。不同权限域仍应使用独立的应用实例及 Host/Memory；不能在 prompt 里写 tenant_id 就认为已经隔离。
+
+`workspace` 提供不依赖项目登记的只读文件查询，`projects` 是独立可移除的组织扩展。宿主分配普通会话目录或解析项目目录，保存后按固定 cwd 装配同一 Runtime；不修改进程全局 cwd，不允许界面选择改变活动 Run。私有会话状态不再跟随默认 cwd 哈希分组，详见[工作区功能方案](WORKSPACES.zh-CN.md)与 ADR-058。
 
 ### 默认上限
 
@@ -134,7 +138,7 @@ Memory 和 Planner 作为可选组件留在 `packages/`，不搬入 Runtime。�
 
 `packages/sessions` 持有本地 Store 和 SessionSink，保存线性会话、工作集与确认记录；生产依赖没有 Runtime 实现、Application 或 HTTP。`application/sessions` 是可选的产品调用适配，先保存用户轮次身份再调用现有 `start_task_with_history`。Server 的 `session_routes` 只处理部署目录、授权、路由和安全展示投影。一个会话有多个 Run，不增加执行循环；存储收尾包装器只等待结算。
 
-文件采用版本化的原子完整快照，包含轻量头、回合范围与最新确认检查点。浏览器以分页读取安全历史视图，实时输出仍复用原有 Bridge。不同页面的修改用 revision 防冲突，同一工作空间用 OS 文件锁约束单写者。重启只恢复历史并标识中断，绝不自动重放未知工具。具体边界与测试见[本地会话](LOCAL-SESSIONS.zh-CN.md)。
+文件采用版本化的原子完整快照，包含轻量头、回合范围与最新确认检查点。浏览器以分页读取安全历史视图，实时输出仍复用原有 Bridge。不同页面的修改用 revision 防冲突，同一宿主会话状态目录用 OS 文件锁约束单写者。重启只恢复历史并标识中断，绝不自动重放未知工具。具体边界与测试见[本地会话](LOCAL-SESSIONS.zh-CN.md)。
 
 ## 10. API 7 上下文闭环
 
@@ -142,4 +146,4 @@ Memory 和 Planner 作为可选组件留在 `packages/`，不搬入 Runtime。�
 
 来源通过 `ContextTransform::sources` 返回有身份的 `ContextBlock`，Runtime 先收集和计入完整请求预算，再压缩真正历史并插入来源；Skills、Memory、项目规则不再混淆真实用户锚点。主对话用量计量仅保留匹配配置与消息前缀的哈希锚点，不使用摘要调用用量替代占用估算。
 
-会话格式 2 分开完整档案和有界模型工作集。Compaction 的摘要/覆盖范围由原有同步检查点确认后持久保存，跨 Run 与重启复用；完整档案不会被摘要覆盖。`instructions` 扩展与 `sessions::references` 提供可装配来源，Spill 底层隔离不变，同会话跨 Run 读取由宿主验证结构化引用归属。接口变化与取舍见[上下文管理](CONTEXT-MANAGEMENT.zh-CN.md)及[会话扩展](../packages/sessions/README.md)。
+会话格式 3 分开完整档案和有界模型工作集，同时固定每个会话的实际工作目录。Compaction 的摘要/覆盖范围由原有同步检查点确认后持久保存，跨 Run 与重启复用；完整档案不会被摘要覆盖。`instructions` 扩展与 `sessions::references` 提供可装配来源，Spill 底层隔离不变，同会话跨 Run 读取由宿主验证结构化引用归属。接口变化与取舍见[上下文管理](CONTEXT-MANAGEMENT.zh-CN.md)及[会话扩展](../packages/sessions/README.md)。

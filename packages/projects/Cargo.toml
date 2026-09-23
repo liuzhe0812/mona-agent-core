@@ -1,0 +1,12 @@
+[package]
+name = "projects"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+workspace = { path = "../workspace" }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+tempfile = "3"

@@ -44,7 +44,9 @@ const fixture = createServer(async (req, res) => {
       return;
     }
     if (latest.includes('fixture.txt') && body.messages.at(-1).role === 'user') {
-      frame({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `read-${requests.length}`, type: 'function', function: { name: 'read', arguments: JSON.stringify({ path: 'fixture.txt' }) } }] }, finish_reason: 'tool_calls' }] });
+      // The history fixture is explicit test-owned input, not the ordinary session's cwd.
+      // Relative per-session writes and Shell cwd are covered in workspaces-e2e.mjs.
+      frame({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `read-${requests.length}`, type: 'function', function: { name: 'read', arguments: JSON.stringify({ path: join(workspace, 'fixture.txt') }) } }] }, finish_reason: 'tool_calls' }] });
     } else {
       frame({ choices: [{ index: 0, delta: { content: `本地测试回复：${users.join(' / ')}` }, finish_reason: 'stop' }] });
     }
@@ -64,12 +66,12 @@ async function api(path, body) {
 }
 let hostLog = '';
 async function startHost(origin) {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENT_')));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENT_') && !key.startsWith('MONA_DEV_')));
   Object.assign(env, { AGENT_SERVER_ADDR: `127.0.0.1:${apiPort}`, AGENT_SERVER_TOKEN: token, AGENT_UI_ORIGIN: origin,
     AGENT_MODEL_ENDPOINT: modelEndpoint, AGENT_MODEL_NAME: 'local-session-fixture', AGENT_ALLOW_HTTP_LOOPBACK: '1',
     AGENT_MODEL_MANAGEMENT: '0', AGENT_SKILLS: '0', AGENT_SPILL: '0', AGENT_COMPACTION: '0',
     AGENT_WORKSPACE_DIR: workspace, AGENT_SESSIONS_DIR: join(state,'sessions'), AGENT_CAPABILITY_STATE_PATH: join(state,'capabilities.json'),
-    LOCALAPPDATA: state, XDG_STATE_HOME: state,
+    MONA_DEV_STATE_DIR: state, LOCALAPPDATA: state, XDG_STATE_HOME: state,
   });
   const binary = resolve(process.env.MONA_TEST_SERVER || join(root,'target','debug',process.platform === 'win32' ? 'server.exe' : 'server'));
   await access(binary); host = spawn(binary, [], { cwd: workspace, env, stdio: ['ignore','pipe','pipe'] });

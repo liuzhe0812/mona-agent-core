@@ -71,11 +71,15 @@ Node 启动器只负责编排本地进程和开发配置，不执行 Agent 循�
 | `AGENT_COMPACTION` | 按能力配置，默认启用 | 设为 `0` 时将上下文压缩锁定为关闭 |
 | `AGENT_SPILL` | 按能力配置，默认启用 | 设为 `0` 时将长结果归档锁定为关闭 |
 | `AGENT_SPILL_DIR` | 用户状态目录 | 覆盖长结果私有归档目录 |
-| `AGENT_SESSIONS_DIR` | 用户状态目录下的 `sessions` | 覆盖持久会话根目录，内部仍按规范化工作空间隔离 |
+| `AGENT_SESSIONS_DIR` | 用户状态目录下的 `sessions` | 覆盖宿主权限域的会话状态目录；格式 3 在每会话头保存 cwd，不再按默认 cwd 哈希分目录 |
+| `AGENT_WORKSPACE_DIR` | 用户目录下 `Mona/workspaces` | 部署指定默认工作根并锁定设置；没有覆盖时可由 Web 修改，普通会话各分配子目录 |
+| `AGENT_PROJECTS` | 默认启用（需编译 projects feature） | 设为 `0` 不装配项目管理，基础工作目录和文件栏保持可用 |
 
 Windows 默认状态目录为 `%LOCALAPPDATA%/mona-agent-core`；Unix 默认使用 `XDG_STATE_HOME/mona-agent-core` 或 `$HOME/.local/state/mona-agent-core`。
 
 正式四工具为 `read/shell/edit/write`。`shell` 的后端由宿主解析：Windows 优先 `pwsh.exe`，否则使用系统 Windows PowerShell；Linux/Unix 优先 `bash`，否则使用 `sh`。模型收到的工具描述会标明实际语法，命令必须按该语法编写。
+
+工作文件不再默认写入本仓库。普通会话在默认根下分配独立目录；项目会话直接绑定项目目录；右侧文件栏跟随当前会话。详细用法见[工作区方案](WORKSPACES.zh-CN.md)。当前会话格式为 3，不自动迁移旧格式。保留旧开发记录时，请由开发者显式设置新的 `MONA_DEV_STATE_DIR`（独立整套开发状态）或 `AGENT_SESSIONS_DIR`（仅独立会话），不要删除原状态以绕过报错。
 
 ## 5. 重要边界
 

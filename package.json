@@ -8,9 +8,10 @@
   "scripts": {
     "dev:web": "node scripts/dev-web.mjs",
     "check:web:design": "node scripts/check-web-design.mjs",
-    "test:web": "node --test scripts/dev-web.test.mjs apps/web/capabilities.test.mjs apps/web/design-system.test.mjs apps/web/model-settings.test.mjs apps/web/run-view.test.mjs apps/web/spill.test.mjs apps/web/sessions.test.mjs apps/web/theme.test.mjs",
+    "test:web": "node --test scripts/dev-web.test.mjs apps/web/capabilities.test.mjs apps/web/design-system.test.mjs apps/web/model-settings.test.mjs apps/web/run-view.test.mjs apps/web/spill.test.mjs apps/web/sessions.test.mjs apps/web/theme.test.mjs apps/web/workspace.test.mjs",
     "test:web:design": "node apps/web/test/design-system-e2e.mjs",
     "test:web:themes": "node apps/web/test/themes-e2e.mjs",
-    "test:web:sidebar": "node apps/web/test/sidebar-e2e.mjs"
+    "test:web:sidebar": "node apps/web/test/sidebar-e2e.mjs",
+    "test:web:workspaces": "node apps/web/test/workspaces-e2e.mjs"
   }
 }

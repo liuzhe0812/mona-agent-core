@@ -17,7 +17,7 @@ use std::{
 
 pub const SESSION_KEY: &str = "mona.session_id";
 pub const TURN_KEY: &str = "mona.turn_id";
-const FORMAT: u32 = 2;
+const FORMAT: u32 = 3;
 const MAX_FILE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_SESSIONS: usize = 1000;
@@ -99,6 +99,8 @@ pub struct Header {
     pub version: u32,
     pub id: String,
     pub workspace: String,
+    /// Host-owned navigation metadata; never used as directory authority or model input.
+    pub metadata: std::collections::BTreeMap<String, String>,
     pub title: String,
     pub revision: u64,
     pub created_at: u64,
@@ -163,14 +165,27 @@ pub struct Store {
 }
 impl Store {
     pub fn open(base: &Path, workspace: &Path) -> Result<Arc<Self>> {
-        let canonical = fs::canonicalize(workspace).map_err(io_error)?;
-        let workspace = canonical.to_str().ok_or_else(corrupt)?.to_owned();
-        #[cfg(windows)]
-        let workspace = workspace.to_lowercase();
-        let key = format!("{:x}", Sha256::digest(workspace.as_bytes()));
-        let root = base.join(key);
+        if !workspace.is_absolute() {
+            return Err(error(Code::InvalidRequest, "默认工作目录必须是绝对路径。"));
+        }
+        let workspace = workspace.to_str().ok_or_else(corrupt)?.to_owned();
+        // The host chooses the authority namespace. Changing the default cwd must not hide history.
+        let root = base.to_owned();
         fs::create_dir_all(&root).map_err(io_error)?;
         regular_path(&root, true)?;
+        for entry in fs::read_dir(&root).map_err(io_error)? {
+            let entry = entry.map_err(io_error)?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if entry.file_type().map_err(io_error)?.is_dir()
+                && name.len() == 64
+                && name.bytes().all(|b| b.is_ascii_hexdigit())
+            {
+                return Err(error(
+                    Code::InvalidRequest,
+                    "检测到旧工作区分组会话格式；请为格式 3 指定独立状态目录，旧记录未修改。",
+                ));
+            }
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -190,7 +205,7 @@ impl Store {
         lease.try_lock().map_err(|_| {
             error(
                 Code::Conflict,
-                "同一工作空间的会话目录已被其他宿主占用，或此文件系统不支持本地锁。",
+                "此会话状态目录已被其他宿主占用，或文件系统不支持本地锁。",
             )
         })?;
         let store = Arc::new(Self {
@@ -201,7 +216,7 @@ impl Store {
             #[cfg(feature = "compaction")]
             compactor: Mutex::new(None),
         });
-        // Only a fresh owner may declare old runs interrupted. Other workspaces use other locks.
+        // Only a fresh owner of this authority namespace may declare old runs interrupted.
         let (headers, _) = store.headers()?;
         for header in headers.into_iter().filter(|h| h.status == Status::Running) {
             let mut doc = match store.load(&header.id) {
@@ -249,7 +264,13 @@ impl Store {
         let header: Header = serde_json::from_slice(&bytes).map_err(|_| corrupt())?;
         validate_id(&header.id).map_err(|_| corrupt())?;
         if header.version != FORMAT
-            || header.workspace != self.workspace
+            || !Path::new(&header.workspace).is_absolute()
+            || header.workspace.len() > 4096
+            || header.metadata.len() > 16
+            || header
+                .metadata
+                .iter()
+                .any(|(k, v)| k.len() > 128 || v.len() > 4096)
             || header.title.len() > 320
             || path.file_stem().and_then(|v| v.to_str()) != Some(header.id.as_str())
         {
@@ -408,15 +429,37 @@ impl Store {
         query: &str,
         archived: bool,
     ) -> Result<Listing> {
+        self.list_matching(offset, limit, query, archived, |_| true)
+    }
+    /// Lightweight identity lookup; does not load the transcript or require cwd to exist.
+    pub fn header(&self, id: &str) -> Result<Header> {
+        let _guard = self.gate.lock().map_err(io_error)?;
+        let path = self.path(id)?;
+        if !path.exists() {
+            return Err(error(Code::NotFound, "会话不存在或已删除。"));
+        }
+        self.read_header(&path)
+    }
+    /// Host-supplied, non-I/O navigation filter. Must not re-enter this Store.
+    pub fn list_matching(
+        &self,
+        offset: usize,
+        limit: usize,
+        query: &str,
+        archived: bool,
+        filter: impl Fn(&Header) -> bool,
+    ) -> Result<Listing> {
         let _guard = self.gate.lock().map_err(io_error)?;
         if !(1..=100).contains(&limit) || query.len() > 320 {
             return Err(error(Code::InvalidRequest, "分页或搜索参数超限。"));
         }
         let (mut headers, unreadable) = self.headers()?;
         let query = query.to_lowercase();
-        headers.retain(|h| h.archived == archived && h.title.to_lowercase().contains(&query));
-        let next = offset.saturating_add(limit);
-        let next_offset = (next < headers.len()).then_some(next);
+        headers.retain(|h| {
+            h.archived == archived && h.title.to_lowercase().contains(&query) && filter(h)
+        });
+        let end = offset.saturating_add(limit);
+        let next_offset = (end < headers.len()).then_some(end);
         Ok(Listing {
             sessions: headers.into_iter().skip(offset).take(limit).collect(),
             next_offset,
@@ -427,13 +470,53 @@ impl Store {
         let _guard = self.gate.lock().map_err(io_error)?;
         self.load(id)
     }
+    /// Convenience for an explicit default directory supplied by the embedding host.
     pub fn create(&self, key: &str) -> Result<Header> {
+        self.create_in(
+            key,
+            Path::new(&self.workspace),
+            std::collections::BTreeMap::new(),
+        )
+    }
+    /// Bind one session permanently to a trusted cwd. Projects are not a dependency.
+    pub fn create_in(
+        &self,
+        key: &str,
+        workspace: &Path,
+        metadata: std::collections::BTreeMap<String, String>,
+    ) -> Result<Header> {
+        if !workspace.is_absolute() || !workspace.is_dir() {
+            return Err(error(
+                Code::InvalidRequest,
+                "会话工作目录必须是已存在的绝对目录。",
+            ));
+        }
+        let workspace = fs::canonicalize(workspace).map_err(io_error)?;
+        let workspace = workspace.to_str().ok_or_else(corrupt)?.to_owned();
+        if workspace.len() > 4096
+            || metadata.len() > 16
+            || metadata
+                .iter()
+                .any(|(k, v)| k.len() > 128 || v.len() > 4096)
+            || serde_json::to_vec(&metadata).map_err(io_error)?.len() > 8192
+        {
+            return Err(error(Code::InvalidRequest, "会话目录或元数据超限。"));
+        }
         validate_id(key)?;
         let id = format!("s-{key}");
         validate_id(&id)?;
         let _guard = self.gate.lock().map_err(io_error)?;
         match self.load(&id) {
-            Ok(doc) => return Ok(doc.header),
+            Ok(doc) => {
+                return if doc.header.workspace == workspace && doc.header.metadata == metadata {
+                    Ok(doc.header)
+                } else {
+                    Err(error(
+                        Code::Conflict,
+                        "同一会话创建请求不能改变工作目录或归属。",
+                    ))
+                }
+            }
             Err(e) if e.code == Code::NotFound => {}
             Err(e) => return Err(e),
         }
@@ -445,7 +528,8 @@ impl Store {
             header: Header {
                 version: FORMAT,
                 id,
-                workspace: self.workspace.clone(),
+                workspace,
+                metadata,
                 title: "新会话".into(),
                 revision: 0,
                 created_at: now_ms(),
@@ -542,7 +626,12 @@ impl Store {
     /// The callback sees the exact next working history; failure leaves the file unchanged.
     /// It must not do I/O or re-enter this Store. Duplicate requests bypass the callback.
     pub fn prepare_checked(
-        &self, id: &str, revision: u64, key: &str, prompt: &str, admission_bytes: usize,
+        &self,
+        id: &str,
+        revision: u64,
+        key: &str,
+        prompt: &str,
+        admission_bytes: usize,
         check: impl FnOnce(&[Message]) -> Result<()>,
     ) -> Result<Prepared> {
         validate_id(key)?;

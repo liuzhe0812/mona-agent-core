@@ -119,13 +119,7 @@ fn unsupported_format_and_missing_current_fields_are_rejected_not_migrated() {
     let base = temp.path().join("state");
     let store = Store::open(&base, temp.path()).unwrap();
     let header = store.create("format").unwrap();
-    let path = std::fs::read_dir(&base)
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path()
-        .join(format!("{}.jsonl", header.id));
+    let path = base.join(format!("{}.jsonl", header.id));
     let original = std::fs::read_to_string(&path).unwrap();
     let (head, body) = original.split_once('\n').unwrap();
     for mode in 0..3 {

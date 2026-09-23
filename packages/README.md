@@ -14,6 +14,8 @@
 | [tools](tools/README.md) | 文件、命令和检索工具，以及可注入的流式输出归档接口 | 当前 Web 使用四工具默认组合；其他宿主按场景选择，沿用公共 `Tool` 接口 |
 | [models](models/README.md) | 协议与供应商设置、凭据、模型能力、目录及固定运行路由 | 可选模型管理组件，由可信宿主接入 |
 | [sessions](sessions/README.md) | 线性持久会话、可靠检查点、工作集恢复和归档归属 | 扩展层；不依赖 Application/HTTP/Runtime 实现，宿主提供目录与授权 |
+| [workspace](workspace/README.md) | 规范化工作目录、受根限制的目录列表和版本化文件预览 | 不依赖项目、会话或 Runtime；用户浏览不调用模型 |
+| [projects](projects/README.md) | 可移除的项目登记、目录绑定与修订控制 | 可选扩展；不创建默认项目，不管理执行循环，不删除工作文件 |
 | [instructions](instructions/README.md) | 工作空间规则发现、来源注入与派发前刷新检查 | 扩展层；普通接口或薄 Plugin，可信历史来源可注入 |
 | [skills](skills/README.md) | 技能发现、校验和模型可见的摘要目录 | 可选；指南和资源通过普通 `read` 渐进加载 |
 | [compaction](compaction/README.md) | 生成结构化任务摘要，导出可验证的整组压缩状态 | 可选；通过统一模型网关计费和取消，宿主保存/恢复状态，不覆盖完整档案 |

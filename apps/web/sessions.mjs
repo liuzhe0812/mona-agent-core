@@ -59,10 +59,14 @@ export class SessionsClient {
       return payload;
     } finally { clearTimeout(timeout); this.#requests.delete(controller); }
   }
-  list({ offset = 0, limit = 50, q = '', archived = false } = {}) {
-    return this.#request(ROOT + page({ offset, limit, q, archived: archived ? 'true' : undefined }));
+  list({ offset = 0, limit = 50, q = '', archived = false, project_id } = {}) {
+    if (project_id) id(project_id);
+    return this.#request(ROOT + page({ offset, limit, q, archived: archived ? 'true' : undefined, project_id }));
   }
-  create(requestId) { id(requestId); return this.#request(ROOT, { request_id: requestId }); }
+  create(requestId, projectId = null) {
+    id(requestId); if (projectId != null) id(projectId);
+    return this.#request(ROOT, { request_id: requestId, ...(projectId == null ? {} : { project_id: projectId }) });
+  }
   get(session, { before, limit = 10 } = {}) { return this.#request(`${ROOT}/${id(session)}` + page({ before, limit })); }
   turn(session, turn, { before, limit = 50 } = {}) { return this.#request(`${ROOT}/${id(session)}/turns/${id(turn)}` + page({ before, limit })); }
   start(session, value) { id(value.request_id); return this.#request(`${ROOT}/${id(session)}/turns`, value); }

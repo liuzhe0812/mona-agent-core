@@ -6,6 +6,7 @@ import { CapabilitiesClient } from './capabilities.mjs';
 import { SpillClient } from './spill.mjs';
 import { TurnView } from './run-view.mjs';
 import { ConversationUI } from './sessions-ui.mjs';
+import { WorkspaceUI } from './workspace-ui.mjs';
 import { mountAppearance } from './appearance.mjs';
 import './tooltip.mjs';
 import './conversation-rail.mjs';
@@ -98,9 +99,11 @@ let providerEditorId = null;
 let providerEditorRevision = 0;
 let providerEditorModels = [];
 let modelEditor = null;
+let workspaceUI = null;
 const conversations = new ConversationUI({
   busy: () => starting || Boolean(active && !active.done),
-  changed: () => setBusy(Boolean(active && !active.done)),
+  changed: () => { setBusy(Boolean(active && !active.done)); workspaceUI?.setSession(conversations.selected); },
+  findProject: id => workspaceUI?.projectState?.projects.find(p => p.id === id),
   createTurn,
   openSettings: () => showSettings(),
   clear() {
@@ -115,6 +118,18 @@ const conversations = new ConversationUI({
     void subscribeRun(runId, view, dom);
   },
 });
+
+workspaceUI = new WorkspaceUI({
+  currentProject: () => conversations.project,
+  selectProject: project => conversations.selectProject(project),
+  async projectsChanged() {
+    if (conversations.project && !workspaceUI.projectState?.projects.some(p => p.id === conversations.project.id)) {
+      conversations.project = null; conversations.title();
+    }
+    await conversations.refreshList();
+  },
+});
+
 
 function normalizeModelSettings(value) {
   const providers = Array.isArray(value?.providers) ? value.providers.map((provider) => ({
@@ -171,6 +186,7 @@ function clearModelSettings() {
   modelSettings.clear();
   capabilities.clear();
   spillResults.clear();
+  workspaceUI?.clear();
   capabilitiesState = null;
   modelSettingsState = null;
   modelSettingsActiveId = null;
@@ -280,12 +296,13 @@ async function saveProviderRecord(provider, fields = {}, successMessage = 'å·²ä¿
 }
 
 function selectSettingsSection(section) {
-  if (!['components', 'tools', 'models', 'appearance'].includes(section)) section = 'components';
+  if (!['components', 'tools', 'models', 'appearance', 'workspace'].includes(section)) section = 'components';
   for (const [name, panel, tab] of [
     ['components', componentSettingsSection, componentsTab],
     ['tools', toolSettingsSection, toolsTab],
     ['models', modelSettingsSection, modelsTab],
     ['appearance', appearanceSection, appearanceTab],
+    ['workspace', $('#workspace-settings-section'), $('#settings-workspace-tab')],
   ]) {
     const selected = section === name;
     panel.hidden = !selected;
@@ -293,7 +310,10 @@ function selectSettingsSection(section) {
     if (selected) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
   }
-  if (section === 'appearance') {
+  if (section === 'workspace') {
+    void workspaceUI.refreshSettings();
+    $('#workspace-root').focus();
+  } else if (section === 'appearance') {
     appearance?.focus();
   } else if (section === 'models') {
     renderModelSettings();
@@ -311,11 +331,13 @@ function showSettings(section = 'components') {
   chatSidebar.hidden = true;
   chatWorkspace.hidden = true;
   settingsPage.hidden = false;
+  workspaceUI?.settingsVisibility(true);
   selectSettingsSection(section);
 }
 
 function hideSettings() {
   settingsPage.hidden = true;
+  workspaceUI?.settingsVisibility(false);
   chatSidebar.hidden = false;
   chatWorkspace.hidden = false;
   prompt.focus();
@@ -975,7 +997,8 @@ async function connectHttp(baseUrl, bearer) {
   setBusy(false);
   void refreshModelSettings({ silent: true });
   void refreshCapabilities({ silent: true });
-  await conversations.configure(baseUrl, bearer);
+  await workspaceUI.configure(baseUrl, bearer);
+  await conversations.configure(baseUrl, bearer, { projectsEnabled: workspaceUI.settings?.projects_enabled === true });
 }
 
 async function connectTauri() {
@@ -1065,6 +1088,7 @@ componentsTab.addEventListener('click', () => selectSettingsSection('components'
 toolsTab.addEventListener('click', () => selectSettingsSection('tools'));
 modelsTab.addEventListener('click', () => selectSettingsSection('models'));
 appearanceTab.addEventListener('click', () => selectSettingsSection('appearance'));
+$('#settings-workspace-tab').addEventListener('click', () => selectSettingsSection('workspace'));
 componentsRefresh.addEventListener('click', () => { void refreshCapabilities(); });
 toolsRefresh.addEventListener('click', () => { void refreshCapabilities(); });
 const shell = $('.shell');

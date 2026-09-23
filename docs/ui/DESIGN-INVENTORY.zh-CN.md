@@ -8,6 +8,9 @@
 | --- | --- | --- | --- | --- |
 | `shell` | `/` | `index.html`、`styles.css`、`app.mjs` | governed | design、sidebar |
 | `task-sidebar` | 左侧任务导航 | `index.html`、`sessions.css`、`sessions-ui.mjs` | governed | sidebar、sessions |
+| `project-navigation` | 可选项目列表与添加/移除 | `workspace-ui.mjs`、`workspace.css`、`sessions-ui.mjs` | governed | workspaces、base-only |
+| `workspace-settings` | 设置 → 工作区 | `workspace-ui.mjs`、`workspace.css` | governed | workspaces |
+| `workspace-files` | 右侧文件栏/窄屏浮层 | `workspace-ui.mjs`、`workspace.mjs`、`workspace.css` | governed | workspaces、base-only |
 | `task-search` | 品牌旁搜索 / Ctrl+K | `index.html`、`styles.css`、`sessions-ui.mjs` | governed | sidebar、sessions |
 | `new-task-home` | 新建任务 | `index.html`、`styles.css` | governed | design |
 | `chat-stream` | 提交任务后 | `run-view.mjs`、`content-renderer.mjs`、`styles.css` | governed | design、themes、renderer |

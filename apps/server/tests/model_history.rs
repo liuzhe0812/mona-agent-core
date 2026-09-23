@@ -113,13 +113,8 @@ async fn turn(
     Ok(result)
 }
 fn file(base: &std::path::Path, id: &str) -> Vec<u8> {
-    let root = std::fs::read_dir(base)
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    std::fs::read(root.join(format!("{id}.jsonl"))).unwrap()
+    // Format 3 keys sessions by the host state namespace, not the current cwd.
+    std::fs::read(base.join(format!("{id}.jsonl"))).unwrap()
 }
 #[tokio::test]
 async fn incompatible_switch_is_rejected_before_saving_or_network_and_same_route_survives_reopen() {

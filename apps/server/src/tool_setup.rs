@@ -1,15 +1,6 @@
-use std::{env, path::PathBuf, sync::Arc};
+use std::{env, path::PathBuf};
 
-pub fn from_environment(
-    read_extensions: Vec<Arc<dyn tools::ReadExtension>>,
-) -> Result<tools::ToolConfig, Box<dyn std::error::Error>> {
-    let cwd = match env::var_os("AGENT_WORKSPACE_DIR") {
-        Some(value) => PathBuf::from(value),
-        None => env::current_dir()?,
-    };
-    if !cwd.is_dir() {
-        return Err(format!("Agent workspace is not a directory: {}", cwd.display()).into());
-    }
+pub fn shell_from_environment() -> Result<tools::ShellConfig, Box<dyn std::error::Error>> {
     let shell = match env::var_os("AGENT_SHELL_PATH") {
         Some(value) => tools::ShellConfig::from(require_file(PathBuf::from(value))?),
         None => match env::var_os("AGENT_BASH_PATH") {
@@ -19,9 +10,7 @@ pub fn from_environment(
             None => tools::ShellConfig::discover()?,
         },
     };
-    let mut config = tools::ToolConfig::new(cwd, shell);
-    config.read_extensions = read_extensions;
-    Ok(config)
+    Ok(shell)
 }
 
 fn require_file(path: PathBuf) -> Result<PathBuf, Box<dyn std::error::Error>> {

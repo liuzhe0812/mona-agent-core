@@ -121,7 +121,7 @@ async fn summary_survives_new_runs_and_restart_without_rewriting_archive_or_resu
     let doc = service.store.get(&id).unwrap();
     assert_eq!(doc.history().unwrap()[0].text(), first);
     assert_eq!(doc.history().unwrap().len(), 8);
-    assert_eq!(doc.header.version, 2);
+    assert_eq!(doc.header.version, 3);
     let view = crate::session_routes::view::turn_page(&doc, "first", None, 50).unwrap();
     assert_eq!(view.turn.prompt, first);
     service.app.shutdown(Duration::from_secs(3)).await.unwrap();

@@ -63,9 +63,10 @@ export class ConversationUI {
     this.generation = 0; this.listGeneration = 0; this.entries = []; this.nextOffset = null;
     this.createKey = null; this.searchTimer = undefined; this.searchGeneration = 0; this.results = [];
     this.menuOpener = null; this.rows = new Map();
+    this.project = null; this.projectsEnabled = false;
     applyTasksCollapsed(tasksCollapsed());
     $('#sessions-collapse').addEventListener('click', () => applyTasksCollapsed(!$('.sessions-region').classList.contains('is-collapsed')));
-    $('#sessions-new').addEventListener('click', () => $('#new-chat').click());
+    $('#sessions-new').addEventListener('click', () => { if (this.newChat(this.project)) $('#prompt').focus(); });
     $('#sessions-refresh').addEventListener('click', () => { void this.refresh(); });
     $('#sessions-more').addEventListener('click', () => { void this.refreshList(this.nextOffset).catch(e => this.notice(e.message, true)); });
     this.showArchived = false;
@@ -170,13 +171,14 @@ export class ConversationUI {
   }
   clear() {
     this.generation++; this.listGeneration++; this.api.clear(); this.mode = 'none'; this.loading = false;
-    this.selected = null; this.pending = null; this.createKey = null; this.entries = [];
+    this.selected = null; this.pending = null; this.createKey = null; this.entries = []; this.project = null; this.projectsEnabled = false;
     this.closeSearch(); this.closeMenu(); $('#sessions-search').value = ''; $('#search-results').replaceChildren(); this.results = [];
     $('#sessions-list').replaceChildren(); $('#sessions-more').hidden = true;
     this.hooks.clear(); this.notice('连接后读取本地任务。'); this.notify();
   }
   ephemeral(message) { this.mode = 'ephemeral'; this.notice(message); this.notify(); }
-  async configure(base, token) {
+  async configure(base, token, { projectsEnabled = false } = {}) {
+    this.projectsEnabled = projectsEnabled;
     this.api.configure(base, token); this.mode = 'checking'; this.notify();
     const generation = this.generation;
     try {
@@ -255,7 +257,8 @@ export class ConversationUI {
   async refreshList(offset = 0) {
     if (!this.api.configured) return;
     const generation = ++this.listGeneration;
-    const page = await this.api.list({ offset: offset ?? 0, archived: this.showArchived });
+    const page = await this.api.list({ offset: offset ?? 0, archived: this.showArchived,
+      project_id: this.projectsEnabled ? this.project?.id || '' : undefined });
     if (generation !== this.listGeneration) return;
     if (!page || !Array.isArray(page.sessions)) throw new Error('无效的会话列表');
     this.mode = 'persistent';
@@ -288,6 +291,8 @@ export class ConversationUI {
   }
   title() {
     const title = this.selected?.title || '新任务';
+    $('#project-context').textContent = this.selected?.metadata?.['project.name'] || this.project?.name || '';
+    $('#sessions-section-title').textContent = this.projectsEnabled ? this.project?.name || '普通任务' : '任务';
     $('#thread-title').textContent = title;
     if (this.selected) {
       // A fragment-only URL would resolve against index.html's <base>, not the current page.
@@ -297,12 +302,21 @@ export class ConversationUI {
     }
     this.controls();
   }
-  newChat() {
+  newChat(project = null) {
     if (this.loading || this.hooks.busy()) { this.notice('请先停止当前任务并等待结算。', true); return false; }
+    const scopeChanged = this.project?.id !== project?.id;
+    this.project = project;
     this.generation++; this.selected = null; this.pending = null; this.createKey = null;
+    if (scopeChanged) void this.refreshList().catch(e => this.notice(e.message,true));
     this.hooks.clear(); history.replaceState(null, '', location.pathname + location.search); this.title();
     for (const button of $('#sessions-list').querySelectorAll('button')) { button.classList.remove('active'); button.removeAttribute('aria-current'); }
     this.notify(); return true;
+  }
+  async selectProject(project) {
+    if (!this.newChat(project)) return false;
+    this.showArchived = false; this.syncArchivedChoice();
+    await this.refreshList().catch(e => this.notice(e.message, true));
+    $('#prompt').focus(); return true;
   }
   async submit(value) {
     if (!this.persistent || this.loading) throw new Error('会话尚未就绪。');
@@ -316,7 +330,7 @@ export class ConversationUI {
       }
       if (!this.selected) {
         this.createKey ||= crypto.randomUUID();
-        this.selected = await this.api.create(this.createKey); this.title();
+        this.selected = await this.api.create(this.createKey, this.project?.id); this.title();
       }
       this.pending ||= { request_id: crypto.randomUUID(), revision: this.selected.revision, prompt: value };
       const response = await this.api.start(this.selected.id, this.pending);
@@ -349,7 +363,11 @@ export class ConversationUI {
     try {
       const page = await this.api.get(id, { before, limit: 10 });
       if (generation !== this.generation) return;
-      this.selected = page.session; this.pending = null; this.hooks.clear(); this.title();
+      const oldScope = this.project?.id;
+      this.selected = page.session; this.pending = null;
+      this.project = this.hooks.findProject?.(page.session.metadata?.['project.id']) || null;
+      this.hooks.clear(); this.title();
+      if (oldScope !== this.project?.id) void this.refreshList().catch(e => this.notice(e.message,true));
       if (this.selected.unread) this.markRead(this.selected);
       const nav = node('div', 'history-pagination');
       if (page.next_before != null) {
@@ -528,7 +546,7 @@ export class ConversationUI {
   }
   async removeEntry(entry) {
     if (this.busyForEdit()) return;
-    if (!confirm(`删除任务“${entry.title}”？本地对话记录将被删除，此操作不能撤销。`)) return;
+    if (!confirm(`删除任务“${entry.title}”？本地对话记录将被删除，工作文件会保留。此操作不能撤销。`)) return;
     this.loading = true; this.notify();
     try {
       await this.api.delete(entry.id, entry.revision);

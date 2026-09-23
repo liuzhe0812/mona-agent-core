@@ -4,13 +4,7 @@ use sessions::{Prepared, SessionErrorCode as Code, Status, Store, SESSION_KEY, T
 use std::collections::BTreeMap;
 
 fn file_path(base: &std::path::Path, id: &str) -> std::path::PathBuf {
-    std::fs::read_dir(base)
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path()
-        .join(format!("{id}.jsonl"))
+    base.join(format!("{id}.jsonl"))
 }
 fn checkpoint(id: &str, key: &str, messages: Vec<Message>) -> RunCheckpoint {
     RunCheckpoint {
@@ -175,8 +169,13 @@ fn revisions_pagination_workspace_scope_and_deletion_are_explicit() {
     assert_eq!(store.list(0, 50, "我的", false).unwrap().sessions.len(), 1);
     let other_dir = tmp.path().join("other");
     std::fs::create_dir(&other_dir).unwrap();
-    let other = Store::open(&base, &other_dir).unwrap();
+    // One authority store keeps every bound cwd; another writer may not take it over.
+    assert!(Store::open(&base, &other_dir).is_err());
+    let other = Store::open(&tmp.path().join("other-state"), &other_dir).unwrap();
     assert!(other.list(0, 50, "", false).unwrap().sessions.is_empty());
+    let bound = store.create_in("other-dir", &other_dir, BTreeMap::new()).unwrap();
+    assert_ne!(bound.workspace, h.workspace);
+    assert!(store.create_in("other-dir", tmp.path(), BTreeMap::new()).is_err());
     assert!(store.get("../one").is_err());
     assert!(store.get("s-one/..").is_err());
     store.delete(&h.id, renamed.revision).unwrap();
