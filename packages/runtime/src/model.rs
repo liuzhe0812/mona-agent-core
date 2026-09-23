@@ -1,8 +1,8 @@
 use crate::{gate::{bounded, lock, CancelOnDrop}, validation::{valid_name, validate_messages}};
 use api::*;
 use futures_util::StreamExt;
-use std::{collections::BTreeMap, sync::{Arc, Mutex}};
-use tokio::time::Instant;
+use std::{collections::BTreeMap, sync::{Arc, Mutex}, time::Duration};
+use tokio::time::{sleep, sleep_until, Instant};
 
 #[derive(Default)]
 struct Audits { records: Vec<RequestAudit>, reserved_bytes: usize }
@@ -11,12 +11,82 @@ pub(crate) struct Gateway {
     raw: Arc<dyn Model>, task: TaskControl, cancel: CancellationToken,
     defaults: ModelOptions,
     limits: RunLimits, audits: Arc<Mutex<Audits>>,
+    input_meter: Mutex<crate::meter::InputMeter>,
 }
 impl Gateway {
     pub fn new(raw: Arc<dyn Model>, task: TaskControl, cancel: CancellationToken, limits: RunLimits, defaults: ModelOptions) -> Self {
-        Self { raw, task, cancel, limits, defaults, audits: Arc::new(Mutex::new(Audits::default())) }
+        Self { raw, task, cancel, limits, defaults, audits: Arc::new(Mutex::new(Audits::default())), input_meter: Mutex::new(Default::default()) }
     }
     pub fn audits(&self) -> Vec<RequestAudit> { lock(&self.audits).records.clone() }
+    /// Only the executor's main conversation calls enter this path. Summary/tool calls
+    /// continue to use ModelCaller::complete and cannot contaminate the usage anchor.
+    pub async fn complete_primary(&self, mut request: ModelRequest, sink: Option<Arc<dyn ModelSink>>) -> Result<ModelReply> {
+        request.options = request.options.inherit(&self.defaults);
+        let prepared = crate::meter::InputMeter::prepare(&request);
+        let reply = self.complete(request, sink).await?;
+        lock(&self.input_meter).record(prepared, reply.usage);
+        Ok(reply)
+    }
+    fn audit_reservation(&self, bytes: usize) -> usize {
+        match self.limits.audit_mode {
+            AuditMode::Full => bytes.saturating_add(8192),
+            AuditMode::Metadata => 8192,
+        }
+    }
+    fn check_audit_capacity(&self, audits: &Audits, reservation: usize) -> Result<()> {
+        if audits.reserved_bytes.saturating_add(reservation) > self.limits.max_audit_bytes {
+            return Err(AgentError::new(ErrorCode::Limit, "run audit capacity reached"));
+        }
+        Ok(())
+    }
+    fn check_retry_capacity(&self, bytes: usize) -> Result<()> {
+        if self.cancel.is_cancelled() {
+            return Err(AgentError::new(ErrorCode::Cancelled, "model retry cancelled"));
+        }
+        self.task.check_model_call_available()?;
+        self.check_audit_capacity(&lock(&self.audits), self.audit_reservation(bytes))
+    }
+    fn reserve_audit(&self, request: &ModelRequest, bytes: usize) -> Result<AuditGuard> {
+        let mut audits = lock(&self.audits);
+        let reservation = self.audit_reservation(bytes);
+        self.check_audit_capacity(&audits, reservation)?;
+        self.task.reserve_model_call()?;
+        let index = audits.records.len();
+        audits.records.push(RequestAudit {
+            call_number: index as u64 + 1,
+            request_bytes: bytes,
+            request: (self.limits.audit_mode == AuditMode::Full).then(|| request.clone()),
+            error: None,
+            usage: None,
+            settled: false,
+            partial_text: None,
+        });
+        audits.reserved_bytes += reservation;
+        Ok(AuditGuard { audits: self.audits.clone(), task: self.task.clone(), index, settled: false })
+    }
+    async fn wait_retry(&self, attempt: u32, error: &AgentError, bytes: usize) -> Result<()> {
+        // Do not sleep or record a fictitious attempt once no new call can fit.
+        self.check_retry_capacity(bytes)?;
+        let multiplier = 1u32.checked_shl(attempt.min(30)).unwrap_or(u32::MAX);
+        let local = self.limits.model_retry.initial_delay.saturating_mul(multiplier)
+            .min(self.limits.model_retry.max_delay);
+        let delay = match error.retry_after_ms.map(Duration::from_millis) {
+            Some(provider) if provider <= self.limits.model_retry.max_delay => provider,
+            Some(_) => return Err(error.clone()),
+            None => local,
+        };
+        let deadline = self.task.deadline();
+        tokio::select! {
+            biased;
+            _ = self.cancel.cancelled() => Err(AgentError::new(ErrorCode::Cancelled, "model retry cancelled")),
+            _ = sleep_until(deadline) => Err(AgentError::new(ErrorCode::Deadline, "task deadline reached during model retry")),
+            _ = sleep(delay) => { self.check_retry_capacity(bytes) }
+        }
+    }
+}
+
+fn retryable(error: &AgentError) -> bool {
+    matches!(error.code, ErrorCode::ModelTransport | ErrorCode::ModelRateLimit | ErrorCode::ModelServer)
 }
 
 struct AuditGuard {
@@ -44,6 +114,9 @@ impl Drop for AuditGuard {
 
 #[async_trait]
 impl ModelCaller for Gateway {
+    fn estimate_input_tokens(&self, request: &ModelRequest) -> Option<InputTokenEstimate> {
+        lock(&self.input_meter).estimate(request)
+    }
     async fn complete(&self, mut request: ModelRequest, sink: Option<Arc<dyn ModelSink>>) -> Result<ModelReply> {
         request.options = request.options.inherit(&self.defaults);
         request.options.validate()?;
@@ -61,43 +134,47 @@ impl ModelCaller for Gateway {
             return Err(AgentError::new(ErrorCode::Limit, "model output-token request exceeds run limit"));
         }
         if self.cancel.is_cancelled() { return Err(AgentError::new(ErrorCode::Cancelled, "run cancelled")); }
-        let index = {
-            let mut audits = lock(&self.audits);
-            // Reserve room for bounded error/partial-text evidence as well as the request.
-            let reservation = bytes.saturating_add(8192);
-            if audits.reserved_bytes.saturating_add(reservation) > self.limits.max_audit_bytes {
-                return Err(AgentError::new(ErrorCode::Limit, "run audit capacity reached"));
+        let mut retry = 0;
+        loop {
+            if self.cancel.is_cancelled() { return Err(AgentError::new(ErrorCode::Cancelled, "run cancelled")); }
+            let mut guard = self.reserve_audit(&request, bytes)?;
+            let operation = self.cancel.child_token();
+            let _drop_cancel = CancelOnDrop(operation.clone());
+            let mut collected = Collected::default();
+            let deadline = self.task.deadline().min(Instant::now() + self.limits.model_timeout);
+            let attempt_request = request.clone();
+            let result = bounded(&self.cancel, &operation, deadline, self.limits.cancellation_grace, async {
+                let mut stream = self.raw.stream(attempt_request, operation.clone()).await?;
+                while let Some(event) = stream.next().await {
+                    collected.push(event?, &self.limits, sink.as_deref())?;
+                }
+                let reply = collected.reply()?;
+                if reply.tool_calls.iter().any(|call| !offered.contains(&call.name)) {
+                    return Err(AgentError::new(ErrorCode::ModelProtocol, "model requested a tool outside this round's offered set"));
+                }
+                Ok(reply)
+            }).await;
+            self.task.record_usage(collected.usage);
+            if result.is_err() { self.task.mark_usage_incomplete(); }
+            let result = result.and_then(|reply| { self.task.check()?; Ok(reply) })
+                .map_err(|mut error| {
+                    error.model_output_started |= collected.has_output();
+                    error
+                });
+            let error = result.as_ref().err().cloned();
+            let partial = if error.is_some() && self.limits.audit_mode == AuditMode::Full {
+                Some(clip_utf8(&collected.text, 4096).to_owned())
+            } else { None };
+            guard.settle(error.clone(), collected.usage, partial);
+            match result {
+                Err(error) if retry < self.limits.model_retry.max_retries
+                    && retryable(&error) && !error.model_output_started => {
+                        self.wait_retry(retry, &error, bytes).await?;
+                        retry += 1;
+                    }
+                other => return other,
             }
-            self.task.reserve_model_call()?;
-            let index = audits.records.len();
-            audits.records.push(RequestAudit { call_number: index as u64 + 1, request: request.clone(),
-                error: None, usage: None, settled: false, partial_text: None });
-            audits.reserved_bytes += reservation;
-            index
-        };
-        let mut guard = AuditGuard { audits: self.audits.clone(), task: self.task.clone(), index, settled: false };
-        let operation = self.cancel.child_token();
-        let _drop_cancel = CancelOnDrop(operation.clone());
-        let mut collected = Collected::default();
-        let deadline = self.task.deadline().min(Instant::now() + self.limits.model_timeout);
-        let result = bounded(&self.cancel, &operation, deadline, self.limits.cancellation_grace, async {
-            let mut stream = self.raw.stream(request, operation.clone()).await?;
-            while let Some(event) = stream.next().await {
-                collected.push(event?, &self.limits, sink.as_deref())?;
-            }
-            let reply = collected.reply()?;
-            if reply.tool_calls.iter().any(|call| !offered.contains(&call.name)) {
-                return Err(AgentError::new(ErrorCode::ModelProtocol, "model requested a tool outside this round's offered set"));
-            }
-            Ok(reply)
-        }).await;
-        self.task.record_usage(collected.usage);
-        if result.is_err() { self.task.mark_usage_incomplete(); }
-        let result = result.and_then(|reply| { self.task.check()?; Ok(reply) });
-        let error = result.as_ref().err().cloned();
-        let partial = if error.is_some() { Some(clip_utf8(&collected.text, 4096).to_owned()) } else { None };
-        guard.settle(error, collected.usage, partial);
-        result
+        }
     }
 }
 
@@ -109,6 +186,10 @@ struct Collected {
     finish: Option<FinishReason>, ended: bool, usage: Option<Usage>, bytes: usize,
 }
 impl Collected {
+    fn has_output(&self) -> bool {
+        !self.text.is_empty() || !self.reasoning.is_empty() || self.provider_data.is_some()
+            || !self.calls.is_empty()
+    }
     fn push(&mut self, event: ModelEvent, limits: &RunLimits, sink: Option<&dyn ModelSink>) -> Result<()> {
         if self.ended { return Err(AgentError::new(ErrorCode::ModelProtocol, "event after model stream end")); }
         let data_bytes = match &event {

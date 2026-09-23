@@ -2,7 +2,7 @@ mod support;
 use api::*;
 use runtime::{validate_messages, HostBuilder};
 use serde_json::json;
-use std::{sync::{Arc, atomic::Ordering}, time::Duration};
+use std::{collections::BTreeSet, sync::{Arc, atomic::{AtomicUsize, Ordering}}, time::Duration};
 use support::*;
 use tokio::sync::Notify;
 
@@ -64,12 +64,190 @@ async fn missing_transport_end_never_executes_a_tool() {
 #[tokio::test]
 async fn schema_error_is_a_result_not_a_tool_invocation() {
     let tool = Arc::new(CountTool::default());
-    let model = ScriptModel::new(vec![calls(&[("bad", "count", json!({"value":"wrong"}))]), answer("correct it")]);
+    let model = ScriptModel::new(vec![calls(&[("bad", "count", json!({"value":"PRIVATE_ARGUMENT"}))]), answer("correct it")]);
     let mut host = HostBuilder::new().model(model).tool(tool.clone()).build().await.unwrap();
     let report = host.engine().execute(RunRequest::new("run")).await.unwrap();
     assert_eq!(report.status, RunStatus::Completed);
-    assert_eq!(results(&report)[0].status, ToolStatus::Error);
+    let result = results(&report)[0];
+    assert_eq!(result.status, ToolStatus::Error);
+    assert!(result.content.text().contains("/value"));
+    assert!(result.content.text().contains("expected integer"));
+    assert!(!result.content.text().contains("PRIVATE_ARGUMENT"));
     assert_eq!(tool.probe.count.load(Ordering::SeqCst), 0);
+    host.shutdown().await.unwrap();
+}
+
+struct FlakyModel {
+    attempts: AtomicUsize,
+    failure: ErrorCode,
+    partial: bool,
+}
+#[async_trait]
+impl Model for FlakyModel {
+    async fn stream(&self, _: ModelRequest, _: CancellationToken) -> Result<ModelStream> {
+        let attempt = self.attempts.fetch_add(1, Ordering::SeqCst);
+        if attempt == 0 {
+            let error = AgentError::new(self.failure, "injected model failure");
+            if self.partial {
+                return Ok(Box::pin(futures_util::stream::iter(vec![
+                    Ok(ModelEvent::Text("partial".into())),
+                    Err(error),
+                ])));
+            }
+            return Err(error);
+        }
+        Ok(Box::pin(futures_util::stream::iter(answer("recovered").into_iter().map(Ok))))
+    }
+}
+
+#[tokio::test]
+async fn transient_model_failure_retries_within_budget() {
+    let model = Arc::new(FlakyModel { attempts: AtomicUsize::new(0), failure: ErrorCode::ModelServer, partial: false });
+    let mut host = HostBuilder::new().model(model.clone()).build().await.unwrap();
+    let mut request = RunRequest::new("run");
+    request.limits.model_retry = ModelRetryPolicy {
+        max_retries: 1,
+        initial_delay: Duration::from_millis(1),
+        max_delay: Duration::from_millis(1),
+    };
+    let report = host.engine().execute(request).await.unwrap();
+    assert_eq!(report.status, RunStatus::Completed);
+    assert_eq!(report.output.as_deref(), Some("recovered"));
+    assert_eq!(report.task_usage.model_calls, 2);
+    assert_eq!(report.model_requests.len(), 2);
+    host.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn model_retry_wait_is_cancelled_with_the_run() {
+    let model = Arc::new(FlakyModel { attempts: AtomicUsize::new(0), failure: ErrorCode::ModelServer, partial: false });
+    let mut host = HostBuilder::new().model(model.clone()).build().await.unwrap();
+    let mut request = RunRequest::new("run");
+    request.limits.model_retry = ModelRetryPolicy {
+        max_retries: 1,
+        initial_delay: Duration::from_secs(10),
+        max_delay: Duration::from_secs(10),
+    };
+    let handle = host.engine().start(request).unwrap();
+    while model.attempts.load(Ordering::SeqCst) == 0 { tokio::task::yield_now().await; }
+    handle.cancel();
+    let report = tokio::time::timeout(Duration::from_secs(1), handle.wait()).await.unwrap().unwrap();
+    assert_eq!(report.status, RunStatus::Cancelled);
+    assert_eq!(model.attempts.load(Ordering::SeqCst), 1);
+    host.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn authentication_and_partial_output_are_never_retried() {
+    for (failure, partial) in [
+        (ErrorCode::ModelAuthentication, false),
+        (ErrorCode::ModelRequest, false),
+        (ErrorCode::ModelTransport, true),
+    ] {
+        let model = Arc::new(FlakyModel { attempts: AtomicUsize::new(0), failure, partial });
+        let mut host = HostBuilder::new().model(model.clone()).build().await.unwrap();
+        let mut request = RunRequest::new("run");
+        request.limits.model_retry = ModelRetryPolicy {
+            max_retries: 2,
+            initial_delay: Duration::from_millis(1),
+            max_delay: Duration::from_millis(1),
+        };
+        let report = host.engine().execute(request).await.unwrap();
+        assert_eq!(report.status, RunStatus::Failed);
+        assert_eq!(model.attempts.load(Ordering::SeqCst), 1);
+        host.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn metadata_audit_omits_request_bodies_and_reduces_report_size() {
+    async fn run(mode: AuditMode) -> Arc<RunReport> {
+        let mut host = HostBuilder::new().model(ScriptModel::new(vec![answer("done")])).build().await.unwrap();
+        let mut request = RunRequest::new("x".repeat(32 * 1024));
+        request.limits.audit_mode = mode;
+        request.limits.max_context_bytes = 64 * 1024;
+        let report = host.engine().execute(request).await.unwrap();
+        host.shutdown().await.unwrap();
+        report
+    }
+    let full = run(AuditMode::Full).await;
+    let metadata = run(AuditMode::Metadata).await;
+    assert_eq!(full.status, RunStatus::Completed);
+    assert_eq!(metadata.status, RunStatus::Completed);
+    assert!(full.model_requests[0].request.is_some());
+    assert!(metadata.model_requests[0].request.is_none());
+    assert_eq!(full.model_requests[0].request_bytes, metadata.model_requests[0].request_bytes);
+    let full_bytes = serde_json::to_vec(&full.model_requests).unwrap().len();
+    let metadata_bytes = serde_json::to_vec(&metadata.model_requests).unwrap().len();
+    eprintln!("audit bytes: full={full_bytes}, metadata={metadata_bytes}");
+    assert!(metadata_bytes < full_bytes);
+}
+
+#[tokio::test]
+async fn adapter_reported_partial_output_prevents_retry() {
+    struct ReportedPartial(AtomicUsize);
+    #[async_trait]
+    impl Model for ReportedPartial {
+        async fn stream(&self, _: ModelRequest, _: CancellationToken) -> Result<ModelStream> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            let mut error = AgentError::new(ErrorCode::ModelTransport, "adapter observed partial output");
+            error.model_output_started = true;
+            Err(error)
+        }
+    }
+    let model = Arc::new(ReportedPartial(AtomicUsize::new(0)));
+    let mut host = HostBuilder::new().model(model.clone()).build().await.unwrap();
+    let mut request = RunRequest::new("go");
+    request.limits.model_retry = ModelRetryPolicy {
+        max_retries: 2, initial_delay: Duration::from_millis(1), max_delay: Duration::from_millis(1),
+    };
+    let report = host.engine().execute(request).await.unwrap();
+    assert_eq!(report.status, RunStatus::Failed);
+    assert_eq!(model.0.load(Ordering::SeqCst), 1);
+    assert!(report.error.as_ref().unwrap().model_output_started);
+    host.shutdown().await.unwrap();
+}
+
+struct ManyRequiredTool {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+impl ManyRequiredTool {
+    fn parameters() -> serde_json::Value {
+        let mut properties = serde_json::Map::new();
+        let mut required = Vec::new();
+        for index in 0..64 {
+            let name = format!("field_{index}");
+            properties.insert(name.clone(), json!({"type":"string"}));
+            required.push(name);
+        }
+        json!({"type":"object","properties":properties,"required":required,"additionalProperties":false})
+    }
+}
+#[async_trait]
+impl Tool for ManyRequiredTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec { name: "many_required".into(), description: "A schema validation test tool".into(),
+            parameters: Self::parameters(), concurrency: ToolConcurrency::Exclusive, side_effects: false }
+    }
+    async fn execute(&self, _: ToolContext, _: serde_json::Value) -> Result<ToolOutput> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok("unexpected execution".into())
+    }
+}
+
+#[tokio::test]
+async fn schema_error_details_are_bounded_and_report_missing_paths() {
+    let invocations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let tool = Arc::new(ManyRequiredTool { calls: invocations.clone() });
+    let model = ScriptModel::new(vec![calls(&[("bad", "many_required", json!({}))]), answer("correct it")]);
+    let mut host = HostBuilder::new().model(model).tool(tool).build().await.unwrap();
+    let report = host.engine().execute(RunRequest::new("run")).await.unwrap();
+    let result = results(&report)[0];
+    assert_eq!(result.status, ToolStatus::Error);
+    assert!(result.content.byte_len() <= 1024);
+    assert!(result.content.text().contains("/field_0: is required"));
+    assert!(result.content.text().contains("additional details omitted"));
+    assert_eq!(invocations.load(Ordering::SeqCst), 0);
     host.shutdown().await.unwrap();
 }
 
@@ -283,6 +461,44 @@ async fn parallel_tools_are_bounded_exclusive_is_a_barrier_results_stay_ordered(
 }
 
 #[tokio::test]
+async fn execution_settles_more_tools_than_the_ui_snapshot_retains() {
+    let count = UI_RETAINED_ITEMS + 44;
+    let calls = (0..count)
+        .map(|index| (format!("call-{index}"), "count", json!({"value":index})))
+        .collect::<Vec<_>>();
+    let events = support::calls(&calls.iter().map(|(id, name, value)| (id.as_str(), *name, value.clone())).collect::<Vec<_>>());
+    let tool = Arc::new(CountTool { concurrency: ToolConcurrency::ParallelSafe, ..Default::default() });
+    let mut host = HostBuilder::new()
+        .model(ScriptModel::new(vec![events, answer("done")]))
+        .tool(tool.clone())
+        .event_capacity(2048)
+        .build()
+        .await
+        .unwrap();
+    let mut request = RunRequest::new("run");
+    request.limits.max_tools_per_step = count;
+    request.limits.max_parallel_tools = 16;
+    let mut handle = host.engine().start(request).unwrap();
+    let report = handle.wait().await.unwrap();
+    let snapshot = handle.snapshot();
+    let mut completed = BTreeSet::new();
+    while let Ok(event) = handle.events.try_recv() {
+        if let RunEvent::ItemCompleted { item } = event.event {
+            if matches!(item.content, ItemContent::ToolCall { .. }) {
+                completed.insert(item.id);
+            }
+        }
+    }
+    assert_eq!(report.status, RunStatus::Completed);
+    assert_eq!(tool.probe.count.load(Ordering::SeqCst), count);
+    assert_eq!(results(&report).len(), count);
+    assert!(snapshot.items.len() <= UI_RETAINED_ITEMS);
+    assert!(snapshot.pruned_items > 0);
+    assert_eq!(completed.len(), count);
+    host.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn cancellation_never_starts_queued_tools_after_the_first() {
     let tool = Arc::new(CountTool { wait_for_cancel: true, concurrency: ToolConcurrency::ParallelSafe, ..Default::default() });
     let events = calls(&[("a","count",json!({"value":1})),("b","count",json!({"value":2})),("c","count",json!({"value":3}))]);
@@ -310,7 +526,7 @@ async fn steering_is_applied_only_after_tool_batch_settlement() {
     let report = handle.wait().await.unwrap();
     let index = report.transcript.iter().position(|m| matches!(m, Message::User { content } if content.text() == "new input")).unwrap();
     assert!(matches!(&report.transcript[index-1], Message::Tool { .. }));
-    assert!(report.model_requests[1].request.messages.iter().any(|m| m.text() == "new input"));
+    assert!(report.model_requests[1].request.as_ref().unwrap().messages.iter().any(|m| m.text() == "new input"));
     host.shutdown().await.unwrap();
 }
 
@@ -318,7 +534,7 @@ struct Echo;
 #[async_trait]
 impl Model for Echo {
     async fn stream(&self, request: ModelRequest, _: CancellationToken) -> Result<ModelStream> {
-        let text = request.messages.last().unwrap().text().to_owned();
+        let text = request.messages.last().unwrap().text().into_owned();
         Ok(Box::pin(futures_util::stream::iter(answer(&text).into_iter().map(Ok))))
     }
 }
@@ -365,7 +581,7 @@ async fn plugin_auxiliary_model_calls_are_counted_against_the_same_budget() {
     let report = host.engine().execute(request).await.unwrap();
     assert_eq!(report.status, RunStatus::Limited);
     assert_eq!(report.task_usage.model_calls, 1);
-    assert_eq!(report.model_requests[0].request.messages[0].text(), "auxiliary work");
+    assert_eq!(report.model_requests[0].request.as_ref().unwrap().messages[0].text(), "auxiliary work");
     assert_eq!(model.requests.lock().unwrap().len(), 1);
     host.shutdown().await.unwrap();
 }

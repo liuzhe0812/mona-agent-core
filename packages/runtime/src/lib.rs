@@ -4,8 +4,10 @@ mod checkpoint;
 mod engine;
 mod events;
 mod gate;
+mod history;
 mod host;
 mod model;
+mod meter;
 mod tools;
 mod validation;
 

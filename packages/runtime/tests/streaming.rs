@@ -83,6 +83,22 @@ async fn hidden_reasoning_is_never_broadcast_as_visible_text() {
     host.shutdown().await.unwrap();
 }
 
+#[tokio::test]
+async fn partial_message_is_retained_when_model_fails_after_text() {
+    let mut host = HostBuilder::new()
+        .model(ScriptModel::new(vec![vec![ModelEvent::Text("partial".into())]]))
+        .build()
+        .await
+        .unwrap();
+    let run = host.engine().start(RunRequest::new("test")).unwrap();
+    run.wait().await.unwrap();
+    let snapshot = run.snapshot();
+    assert!(matches!(snapshot.items.iter().find(|i| i.id == "step-1-message"),
+        Some(WorkItem { state: ItemState::Failed, content: ItemContent::AgentMessage { text, .. }, .. })
+            if text == "partial"));
+    host.shutdown().await.unwrap();
+}
+
 struct DetailTool;
 #[async_trait]
 impl Tool for DetailTool {
@@ -90,8 +106,9 @@ impl Tool for DetailTool {
     async fn execute(&self, ctx: ToolContext, _args: serde_json::Value) -> Result<ToolOutput> {
         assert!(ctx.progress.set_detail("unsafe-key", serde_json::json!({})).is_err());
         assert!(ctx.progress.set_detail("coding.large", serde_json::json!("x".repeat(UI_DETAIL_BYTES + 1))).is_err());
+        ctx.progress.report("a line of output");
         ctx.progress.set_detail("coding.diff", serde_json::json!({"path":"example.rs","added":2}))?;
-        ctx.progress.report("a line of output"); Ok("result".into())
+        Ok("result".into())
     }
 }
 #[tokio::test]
@@ -101,7 +118,7 @@ async fn structured_tool_details_survive_authoritative_completion() {
     let run = host.engine().start(RunRequest::new("details")).unwrap(); run.wait().await.unwrap();
     let snapshot = run.snapshot();
     let item = snapshot.items.iter().find(|i| i.id == "step-1-tool-0").unwrap();
-    assert!(matches!(&item.content, ItemContent::ToolCall { details, result: Some(result), .. }
-        if details["coding.diff"]["added"] == 2 && result.status == ToolStatus::Success));
+    assert!(matches!(&item.content, ItemContent::ToolCall { details, output, result: Some(result), .. }
+        if details["coding.diff"]["added"] == 2 && output == "a line of output" && result.status == ToolStatus::Success));
     host.shutdown().await.unwrap();
 }

@@ -1,17 +1,19 @@
 use crate::gate::{lifecycle, lock};
 use api::*;
-use std::{sync::{Arc, Mutex}, time::Duration};
+use std::{collections::BTreeMap, sync::{Arc, Mutex}, time::Duration};
 use tokio::{sync::{broadcast, watch}, task::JoinHandle};
 
 #[derive(Clone)]
 pub(crate) struct EventBus {
     sender: broadcast::Sender<EventEnvelope>,
     state: Arc<Mutex<RunSnapshot>>,
+    active: Arc<Mutex<BTreeMap<String, WorkItem>>>,
 }
 impl EventBus {
     pub fn new(run_id: String, capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity.max(1));
-        Self { sender, state: Arc::new(Mutex::new(RunSnapshot::new(run_id))) }
+        Self { sender, state: Arc::new(Mutex::new(RunSnapshot::new(run_id))),
+            active: Arc::new(Mutex::new(BTreeMap::new())) }
     }
     pub fn snapshot(&self) -> RunSnapshot { lock(&self.state).clone() }
     pub fn subscribe(&self) -> broadcast::Receiver<EventEnvelope> { self.sender.subscribe() }
@@ -21,12 +23,43 @@ impl EventBus {
             run_id: state.run_id.clone(), seq: state.seq + 1, event };
         let applied = state.apply(&envelope);
         debug_assert!(applied);
+        if applied { self.track(&envelope.event); }
         let _ = self.sender.send(envelope);
+    }
+    fn track(&self, event: &RunEvent) {
+        let mut active = lock(&self.active);
+        match event {
+            RunEvent::ItemStarted { item } | RunEvent::ItemUpdated { item } => {
+                if item.state.terminal() { active.remove(&item.id); }
+                else { active.insert(item.id.clone(), item.clone()); }
+            }
+            RunEvent::ItemCompleted { item } => { active.remove(&item.id); }
+            RunEvent::TextDelta { item_id, text } => {
+                if let Some(WorkItem { content: ItemContent::AgentMessage { text: content, truncated }, .. }) = active.get_mut(item_id) {
+                    append_active_preview(content, truncated, text);
+                }
+            }
+            RunEvent::ToolArgumentsDelta { item_id, call_id, name, delta } => {
+                if let Some(WorkItem { content: ItemContent::ToolCall { call_id: old_id, name: old_name,
+                    arguments_text, arguments_truncated, .. }, .. }) = active.get_mut(item_id) {
+                    if call_id.is_some() { *old_id = call_id.clone(); }
+                    if let Some(name) = name { *old_name = clip_utf8(name, 128).to_owned(); }
+                    append_active_preview(arguments_text, arguments_truncated, delta);
+                }
+            }
+            RunEvent::ToolOutputDelta { item_id, text } => {
+                if let Some(WorkItem { content: ItemContent::ToolCall { output, output_truncated, .. }, .. }) = active.get_mut(item_id) {
+                    append_active_preview(output, output_truncated, text);
+                }
+            }
+            RunEvent::RunFinished { .. } => active.clear(),
+            _ => {}
+        }
     }
     pub fn emit(&self, event: RunEvent) { self.publish(&mut lock(&self.state), event); }
     fn change(&self, id: &str, complete: bool, f: impl FnOnce(&mut WorkItem)) {
         let mut state = lock(&self.state);
-        let Some(mut item) = state.items.iter().find(|i| i.id == id && !i.state.terminal()).cloned() else { return; };
+        let Some(mut item) = lock(&self.active).get(id).cloned() else { return; };
         f(&mut item);
         let event = if complete { RunEvent::ItemCompleted { item } } else { RunEvent::ItemUpdated { item } };
         self.publish(&mut state, event);
@@ -43,8 +76,9 @@ impl EventBus {
         // Normally created by the model delta; also supports adapters with no tool preview.
         let mut state = lock(&self.state);
         let id = tool_item_id(step, index);
-        let mut item = state.items.iter().find(|i| i.id == id).cloned().unwrap_or_else(|| WorkItem::tool(step, index));
-        let existed = state.items.iter().any(|i| i.id == id);
+        let tracked = lock(&self.active).get(&id).cloned();
+        let existed = tracked.is_some();
+        let mut item = tracked.unwrap_or_else(|| WorkItem::tool(step, index));
         item.set_call(call);
         self.publish(&mut state, if existed { RunEvent::ItemUpdated { item } } else { RunEvent::ItemStarted { item } });
     }
@@ -61,7 +95,7 @@ impl EventBus {
     }
     pub fn finish(&self, outcome: RunOutcome) {
         let mut state = lock(&self.state);
-        let unfinished = state.items.iter().filter(|i| !i.state.terminal()).cloned().collect::<Vec<_>>();
+        let unfinished = lock(&self.active).values().cloned().collect::<Vec<_>>();
         for mut item in unfinished {
             item.state = match &item.content {
                 ItemContent::ToolCall { .. } if item.state == ItemState::Running => ItemState::Unknown,
@@ -77,7 +111,7 @@ impl EventBus {
         let mut state = lock(&self.state);
         if state.outcome.is_some() { return; }
         let item_id = tool_item_id(step, index);
-        if !state.items.iter().any(|i| i.id == item_id) {
+        if !lock(&self.active).contains_key(&item_id) {
             self.publish(&mut state, RunEvent::ItemStarted { item: WorkItem::tool(step, index) });
         }
         let mut rest = args;
@@ -93,7 +127,7 @@ impl EventBus {
     }
     fn progress(&self, item_id: &str, text: &str) {
         let mut state = lock(&self.state);
-        if !state.items.iter().any(|i| i.id == item_id && i.state == ItemState::Running) { return; }
+        if !lock(&self.active).get(item_id).is_some_and(|item| item.state == ItemState::Running) { return; }
         // Bounded preview; the final tool result is a separate authoritative value.
         let mut rest = text;
         while !rest.is_empty() {
@@ -110,7 +144,7 @@ impl EventBus {
             return Err(AgentError::new(ErrorCode::Limit, "UI detail exceeds byte limit"));
         }
         let mut state = lock(&self.state);
-        let Some(mut item) = state.items.iter().find(|i| i.id == item_id && i.state == ItemState::Running).cloned() else {
+        let Some(mut item) = lock(&self.active).get(item_id).filter(|item| item.state == ItemState::Running).cloned() else {
             return Err(AgentError::new(ErrorCode::Closed, "tool item is not running"));
         };
         if let ItemContent::ToolCall { details, .. } = &mut item.content {
@@ -139,6 +173,14 @@ impl EventBus {
     }
 }
 
+fn append_active_preview(content: &mut String, truncated: &mut bool, delta: &str) {
+    if *truncated { return; }
+    let remaining = UI_TEXT_BYTES.saturating_sub(content.len());
+    let part = clip_utf8(delta, remaining);
+    content.push_str(part);
+    *truncated = part.len() < delta.len();
+}
+
 pub(crate) struct TextSink { bus: EventBus, step: usize }
 impl TextSink {
     pub fn new(bus: EventBus, step: usize) -> Self {
@@ -163,4 +205,32 @@ pub(crate) struct ProgressSink { pub bus: EventBus, pub item_id: String }
 impl ToolProgress for ProgressSink {
     fn report(&self, text: &str) { self.bus.progress(&self.item_id, text); }
     fn set_detail(&self, key: &str, value: serde_json::Value) -> Result<()> { self.bus.detail(&self.item_id, key, value) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evicted_active_tool_keeps_deltas_details_and_terminal_result() {
+        let bus = EventBus::new("test".into(), 1024);
+        bus.emit(RunEvent::ItemStarted { item: WorkItem::tool(1, 0) });
+        bus.tool_delta(1, 0, Some("first"), Some("work"), "{\"value\":");
+        bus.start_tool(1, 0);
+        for index in 1..=UI_RETAINED_ITEMS {
+            bus.emit(RunEvent::ItemStarted { item: WorkItem::tool(1, index) });
+        }
+        let id = tool_item_id(1, 0);
+        assert!(!bus.snapshot().items.iter().any(|item| item.id == id));
+        bus.tool_delta(1, 0, None, None, "1}");
+        bus.progress(&id, "retained progress");
+        bus.detail(&id, "test.detail", serde_json::json!(true)).unwrap();
+        bus.complete_tool(1, 0, &ToolResult::new("first", ToolStatus::Success, "done"));
+        let snapshot = bus.snapshot();
+        let item = snapshot.items.iter().find(|item| item.id == id).unwrap();
+        assert_eq!(item.state, ItemState::Completed);
+        assert!(matches!(&item.content, ItemContent::ToolCall { arguments_text, output, details, result: Some(result), .. }
+            if arguments_text == "{\"value\":1}" && output == "retained progress"
+                && details["test.detail"] == true && result.content == "done"));
+    }
 }

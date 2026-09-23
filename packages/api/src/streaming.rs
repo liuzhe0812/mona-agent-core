@@ -24,15 +24,52 @@ pub struct RunHandle {
 }
 impl RunHandle {
     pub fn new(session: Arc<dyn RunSession>, events: broadcast::Receiver<EventEnvelope>) -> Self {
-        Self { run_id: session.run_id().to_owned(), session, events }
+        Self {
+            run_id: session.run_id().to_owned(),
+            session,
+            events,
+        }
     }
-    pub fn cancel(&self) { self.session.cancel(); }
-    pub fn snapshot(&self) -> RunSnapshot { self.session.snapshot() }
-    pub fn subscribe(&self) -> broadcast::Receiver<EventEnvelope> { self.session.subscribe() }
-    pub fn session(&self) -> Arc<dyn RunSession> { self.session.clone() }
-    pub fn into_parts(self) -> (Arc<dyn RunSession>, broadcast::Receiver<EventEnvelope>) { (self.session, self.events) }
-    pub async fn wait(&self) -> Result<Arc<RunReport>> { self.session.wait().await }
-    pub async fn steer(&self, text: impl Into<String>) -> Result<()> { self.session.steer(text.into()).await }
+    pub fn cancel(&self) {
+        self.session.cancel();
+    }
+    pub fn snapshot(&self) -> RunSnapshot {
+        self.session.snapshot()
+    }
+    pub fn subscribe(&self) -> broadcast::Receiver<EventEnvelope> {
+        self.session.subscribe()
+    }
+    pub fn session(&self) -> Arc<dyn RunSession> {
+        self.session.clone()
+    }
+    pub fn into_parts(self) -> (Arc<dyn RunSession>, broadcast::Receiver<EventEnvelope>) {
+        (self.session, self.events)
+    }
+    /// Own this execution until it settles. Dropping this future cancels only its Run.
+    /// Use this from AgentExecutor wrappers; passive observers should use wait().
+    pub fn wait_owned(self) -> impl std::future::Future<Output = Result<Arc<RunReport>>> + Send {
+        struct CancelOnDrop(Option<Arc<dyn RunSession>>);
+        impl Drop for CancelOnDrop {
+            fn drop(&mut self) {
+                if let Some(session) = &self.0 { session.cancel(); }
+            }
+        }
+        let guard = CancelOnDrop(Some(self.session.clone()));
+        async move {
+            let mut guard = guard;
+            let result = self.session.wait().await;
+            if result.is_ok() { guard.0.take(); }
+            drop(guard);
+            result
+        }
+    }
+    /// Observe completion without owning cancellation; disconnecting observers is harmless.
+    pub async fn wait(&self) -> Result<Arc<RunReport>> {
+        self.session.wait().await
+    }
+    pub async fn steer(&self, text: impl Into<String>) -> Result<()> {
+        self.session.steer(text.into()).await
+    }
 }
 
 /// The default Engine and alternative runtimes share this contract.

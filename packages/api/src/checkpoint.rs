@@ -1,5 +1,7 @@
 //! Optional awaited persistence boundary; no database and no automatic replay engine.
-use crate::{AgentError, CancellationToken, Message, ModelOptions, Result, RunStatus, TaskUsage, ToolResult};
+use crate::{
+    AgentError, CancellationToken, Message, ModelOptions, Result, RunStatus, TaskUsage, ToolResult,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
@@ -22,7 +24,9 @@ pub enum CheckpointToolState {
     Pending,
     /// Durable intent is acknowledged; a crash does NOT tell us if dispatch happened.
     IntentRecorded,
-    Settled { result: ToolResult },
+    Settled {
+        result: ToolResult,
+    },
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunCheckpoint {
@@ -55,5 +59,6 @@ pub trait CheckpointSink: Send + Sync {
     /// Success acknowledges this exact immutable snapshot under the sink's documented
     /// durability contract. Called serially per Run; different Runs may call concurrently.
     /// Must honor cancellation and implement idempotency by (run_id, revision).
-    async fn commit(&self, checkpoint: Arc<RunCheckpoint>, cancel: CancellationToken) -> Result<()>;
+    async fn commit(&self, checkpoint: Arc<RunCheckpoint>, cancel: CancellationToken)
+        -> Result<()>;
 }

@@ -59,6 +59,7 @@ pub(crate) struct Entry {
     pub data: Mutex<RunData>,
     pub changed: watch::Sender<u64>,
     request: StartRequest,
+    context_identity: BTreeMap<String, String>,
 }
 impl Entry {
     fn notify(&self) { self.changed.send_modify(|revision| *revision = revision.wrapping_add(1)); }
@@ -135,6 +136,13 @@ impl AgentApplication {
         state.runs.get(id).cloned().ok_or_else(|| ApplicationError::new(ApplicationErrorCode::NotFound, "run is absent or expired"))
     }
     pub fn start_task(&self, request: StartRequest) -> ApplicationResult<StartResponse> {
+        self.start_task_with_history(request, Vec::new(), BTreeMap::new())
+    }
+    /// Trusted host-only context admission. Not exposed by the generic HTTP/Tauri bridges.
+    /// History is canonical, not a UI snapshot. The host must use a distinct request key
+    /// and metadata identity for each logical turn; retries return the existing run.
+    /// Limits, permissions, model selection and task budgets still come from this application.
+    pub fn start_task_with_history(&self, request: StartRequest, history: Vec<Message>, metadata: BTreeMap<String, String>) -> ApplicationResult<StartResponse> {
         validate_key(&request.request_id)?;
         if request.prompt.is_empty() || request.prompt.len() > self.inner.config.max_prompt_bytes {
             return Err(ApplicationError::new(ApplicationErrorCode::InvalidRequest, "prompt is empty or too large"));
@@ -144,7 +152,7 @@ impl AgentApplication {
         if state.closed { return Err(ApplicationError::new(ApplicationErrorCode::Closed, "application is shutting down")); }
         if let Some(id) = state.requests.get(&request.request_id) {
             let entry = &state.runs[id];
-            if entry.request.prompt != request.prompt { return Err(ApplicationError::new(ApplicationErrorCode::Conflict, "request_id was used with a different prompt")); }
+            if entry.request.prompt != request.prompt || entry.context_identity != metadata { return Err(ApplicationError::new(ApplicationErrorCode::Conflict, "request_id was used with a different prompt or context")); }
             return Ok(StartResponse { run_id: id.clone(), reused: true });
         }
         if state.runs.len() >= self.inner.config.max_retained_runs {
@@ -152,9 +160,11 @@ impl AgentApplication {
         }
         let mut messages = vec![];
         if let Some(system) = &self.inner.config.system_prompt { messages.push(Message::system(system)); }
+        // The current host owns system instructions, not persisted or client-supplied history.
+        messages.extend(history.into_iter().filter(|message| !matches!(message, Message::System { .. })));
         messages.push(Message::user(&request.prompt));
         let run = RunRequest { messages, limits: self.inner.config.run_limits.clone(),
-            task: TaskControl::new(self.inner.config.task_limits.clone()), metadata: BTreeMap::new(), enable_tools: true,
+            task: TaskControl::new(self.inner.config.task_limits.clone()), metadata: metadata.clone(), enable_tools: true,
             allowed_tools: self.inner.config.allowed_tools.clone(), model_options: self.inner.config.model_options.clone() };
         let handle = self.inner.runtime.start(run).map_err(ApplicationError::from)?;
         let (session, events) = handle.into_parts();
@@ -166,7 +176,7 @@ impl AgentApplication {
         // Start with seq=0 and the pre-created receiver, NOT a racy subscribe-after-start.
         let entry = Arc::new(Entry { data: Mutex::new(RunData { snapshot: RunSnapshot::new(&id),
             journal: VecDeque::new(), journal_bytes: 0, reset_floor: 0, fault: None, completed_at: None, inputs: HashMap::new() }),
-            session, changed, request: request.clone() });
+            session, changed, request: request.clone(), context_identity: metadata });
         state.requests.insert(request.request_id, id.clone()); state.runs.insert(id.clone(), entry.clone());
         let config = self.inner.config.clone();
         runtime_handle.spawn(collect(entry, events, config));

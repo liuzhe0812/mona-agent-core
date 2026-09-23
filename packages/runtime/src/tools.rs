@@ -1,9 +1,15 @@
 use crate::{checkpoint::Checkpoints, events::{EventBus, ProgressSink}, gate::{bounded, CancelOnDrop}, host::Registry, validation::valid_name};
+use crate::history::{history_limit, ToolBudget};
 use api::*;
 use futures_util::{stream::FuturesUnordered, StreamExt};
-use jsonschema::{Draft, JSONSchema};
+use jsonschema::{error::{TypeKind, ValidationError, ValidationErrorKind}, Draft, ErrorIterator, JSONSchema};
 use std::{collections::{BTreeSet, VecDeque}, sync::Arc};
 use tokio::time::Instant;
+
+const MAX_SCHEMA_ERRORS: usize = 4;
+const MAX_SCHEMA_ERROR_BYTES: usize = 1024;
+const MAX_SCHEMA_PATH_BYTES: usize = 160;
+const MAX_SCHEMA_REASON_BYTES: usize = 256;
 
 pub(crate) struct CompiledTool {
     pub spec: ToolSpec,
@@ -46,10 +52,12 @@ struct Ready { call: ToolCall, tool: Arc<CompiledTool> }
 pub(crate) async fn execute_batch(
     context: RunContext, registry: Arc<Registry>, limits: RunLimits,
     allowed_effects: &BTreeSet<String>, offered: &BTreeSet<String>, calls: &[ToolCall], bus: EventBus, step: usize, checkpoints: Checkpoints,
+    mut result_budget: ToolBudget,
 ) -> (Vec<ToolResult>, Option<AgentError>) {
     let mut settled: Vec<Option<ToolResult>> = vec![None; calls.len()];
     let mut prepared = vec![];
-    // All policies run before this batch starts causing side effects.
+    // Preflight only immutable schemas/offered tools/host authority. Dynamic policies
+    // run once immediately before each dispatch, after earlier exclusive tools settle.
     for (index, call) in calls.iter().enumerate() {
         let check = async {
             context.task.check()?;
@@ -62,18 +70,11 @@ pub(crate) async fn execute_batch(
                 return Ok(Err(ToolResult::new(&call.id, ToolStatus::Error, "unknown tool")));
             };
             if !tool.validator.is_valid(&call.arguments) {
-                return Ok(Err(ToolResult::new(&call.id, ToolStatus::Error, "arguments do not match the tool's JSON Schema")));
-            }
-            for policy in &registry.policies {
-                let operation = context.cancel.child_token();
-                let _drop_cancel = CancelOnDrop(operation.clone());
-                let mut policy_ctx = context.clone(); policy_ctx.cancel = operation.clone();
-                let decision = bounded(&context.cancel, &operation,
-                    context.task.deadline().min(Instant::now() + limits.hook_timeout), limits.cancellation_grace,
-                    policy.check(&policy_ctx, call, &tool.spec)).await?;
-                if let PolicyDecision::Deny(reason) = decision {
-                    return Ok(Err(ToolResult::new(&call.id, ToolStatus::Denied, clip_utf8(&reason, 4096))));
-                }
+                let message = match tool.validator.validate(&call.arguments) {
+                    Ok(()) => "invalid tool arguments".to_owned(),
+                    Err(errors) => format_schema_errors(errors),
+                };
+                return Ok(Err(ToolResult::new(&call.id, ToolStatus::Error, message)));
             }
             // Final, non-relaxable host gate. Plugin metadata is trusted, not a sandbox.
             if tool.spec.side_effects && !allowed_effects.contains(&tool.spec.name) {
@@ -83,7 +84,17 @@ pub(crate) async fn execute_batch(
         }.await;
         match check {
             Ok(Ok(ready)) => prepared.push((index, ready)),
-            Ok(Err(result)) => settled[index] = Some(result),
+            Ok(Err(mut result)) => {
+                cap_result(&mut result, limits.max_tool_result_bytes);
+                if let Err(error) = result_budget.settle(index, &result) {
+                    // No body has started. Fall back to the pre-reserved pair-closing records.
+                    let results: Vec<_> = calls.iter().map(|c| ToolResult::new(&c.id, ToolStatus::Skipped,
+                        "history limit reached during preflight; not executed")).collect();
+                    for (i, result) in results.iter().enumerate() { bus.complete_tool(step, i, result); }
+                    return (results, Some(error));
+                }
+                settled[index] = Some(result);
+            }
             Err(error) => {
                 // Nothing in this batch has started yet; preserve every call/result pair.
                 let results: Vec<_> = calls.iter().map(|c| ToolResult::new(&c.id, ToolStatus::Skipped, "batch preflight failed; not executed")).collect();
@@ -113,17 +124,28 @@ pub(crate) async fn execute_batch(
         let mut running = FuturesUnordered::new();
         loop {
             while fatal.is_none() && running.len() < limits.max_parallel_tools {
-                let Some((index, ready)) = queue.pop_front() else { break; };
+                let Some((index, ready)) = queue.front() else { break; };
+                if result_budget.reserve(*index, &ready.call.id, limits.max_tool_result_bytes).is_err() {
+                    // In-flight reservations may soon shrink to actual results. Drain first;
+                    // never cancel an already-started tool just to reclaim history capacity.
+                    if running.is_empty() { fatal = Some(history_limit()); }
+                    break;
+                }
+                let (index, ready) = queue.pop_front().expect("front was present");
                 running.push(run_indexed(index, ready, group_ctx.clone(), registry.clone(), limits.clone(), bus.clone(), step, checkpoints.clone()));
             }
             let Some((index, result, error)) = running.next().await else { break; };
+            if let Err(accounting_error) = result_budget.settle(index, &result) {
+                fatal.get_or_insert(accounting_error);
+                group_cancel.cancel();
+            }
             settled[index] = Some(result);
             if let Some(error) = error {
                 if fatal.is_none() { fatal = Some(error); group_cancel.cancel(); }
             }
         }
         for (index, ready) in queue {
-            settled[index] = Some(ToolResult::new(&ready.call.id, ToolStatus::Skipped, "parallel group stopped before execution"));
+            settled[index] = Some(ToolResult::new(&ready.call.id, ToolStatus::Skipped, "batch stopped before dispatch; tool not executed"));
         }
     }
     let results: Vec<_> = calls.iter().enumerate().map(|(index, call)| {
@@ -135,6 +157,109 @@ pub(crate) async fn execute_batch(
     }).collect();
     for (i, result) in results.iter().enumerate() { bus.complete_tool(step, i, result); }
     (results, fatal)
+}
+
+fn format_schema_errors(errors: ErrorIterator<'_>) -> String {
+    let mut message = String::from("invalid tool arguments: ");
+    let mut included = 0;
+    let mut omitted = false;
+    for error in errors {
+        if included >= MAX_SCHEMA_ERRORS {
+            omitted = true;
+            break;
+        }
+        let path = sanitize_text(&schema_error_path(&error), MAX_SCHEMA_PATH_BYTES);
+        let reason = sanitize_text(&schema_error_reason(&error.kind), MAX_SCHEMA_REASON_BYTES);
+        let entry = format!("{path}: {reason}");
+        let separator = if included == 0 { "" } else { "; " };
+        if message.len().saturating_add(separator.len()).saturating_add(entry.len()) > MAX_SCHEMA_ERROR_BYTES {
+            omitted = true;
+            break;
+        }
+        message.push_str(separator);
+        message.push_str(&entry);
+        included += 1;
+    }
+    if omitted {
+        let suffix = if included == 0 { "details omitted" } else { "; additional details omitted" };
+        let available = MAX_SCHEMA_ERROR_BYTES.saturating_sub(message.len());
+        message.push_str(clip_utf8(suffix, available));
+    }
+    message
+}
+
+fn schema_error_path(error: &ValidationError<'_>) -> String {
+    let path = error.instance_path.to_string();
+    if let ValidationErrorKind::Required { property } = &error.kind {
+        if let Some(property) = property.as_str() {
+            let property = property.replace('~', "~0").replace('/', "~1");
+            return format!("{path}/{property}");
+        }
+    }
+    if path.is_empty() { "$".to_owned() } else { path }
+}
+
+fn schema_error_reason(kind: &ValidationErrorKind) -> String {
+    match kind {
+        ValidationErrorKind::AdditionalItems { limit } => format!("too many items (maximum {limit})"),
+        ValidationErrorKind::AdditionalProperties { unexpected } => {
+            let names = unexpected.iter().take(MAX_SCHEMA_ERRORS).map(|name| format!("`{name}`")).collect::<Vec<_>>().join(", ");
+            format!("unexpected properties: {names}")
+        }
+        ValidationErrorKind::AnyOf => "does not match any allowed schema".to_owned(),
+        ValidationErrorKind::BacktrackLimitExceeded { .. } => "pattern validation exceeded its limit".to_owned(),
+        ValidationErrorKind::Constant { .. } => "must equal the configured value".to_owned(),
+        ValidationErrorKind::Contains => "no item matches the required schema".to_owned(),
+        ValidationErrorKind::ContentEncoding { .. } => "has an invalid content encoding".to_owned(),
+        ValidationErrorKind::ContentMediaType { .. } => "has an invalid content media type".to_owned(),
+        ValidationErrorKind::Custom { message } => format!("validation failed: {message}"),
+        ValidationErrorKind::Enum { .. } => "must be one of the allowed values".to_owned(),
+        ValidationErrorKind::ExclusiveMaximum { limit } => format!("must be < {limit}"),
+        ValidationErrorKind::ExclusiveMinimum { limit } => format!("must be > {limit}"),
+        ValidationErrorKind::FalseSchema => "is not allowed".to_owned(),
+        ValidationErrorKind::FileNotFound { .. }
+        | ValidationErrorKind::FromUtf8 { .. }
+        | ValidationErrorKind::InvalidReference { .. }
+        | ValidationErrorKind::InvalidURL { .. }
+        | ValidationErrorKind::JSONParse { .. }
+        | ValidationErrorKind::Resolver { .. }
+        | ValidationErrorKind::Schema
+        | ValidationErrorKind::UnknownReferenceScheme { .. }
+        | ValidationErrorKind::Utf8 { .. } => "failed schema validation".to_owned(),
+        ValidationErrorKind::Format { format } => format!("must match format `{format}`"),
+        ValidationErrorKind::MaxItems { limit } => format!("has too many items (maximum {limit})"),
+        ValidationErrorKind::Maximum { limit } => format!("must be <= {limit}"),
+        ValidationErrorKind::MaxLength { limit } => format!("is too long (maximum {limit} characters)"),
+        ValidationErrorKind::MaxProperties { limit } => format!("has too many properties (maximum {limit})"),
+        ValidationErrorKind::MinItems { limit } => format!("has too few items (minimum {limit})"),
+        ValidationErrorKind::Minimum { limit } => format!("must be >= {limit}"),
+        ValidationErrorKind::MinLength { limit } => format!("is too short (minimum {limit} characters)"),
+        ValidationErrorKind::MinProperties { limit } => format!("has too few properties (minimum {limit})"),
+        ValidationErrorKind::MultipleOf { multiple_of } => format!("must be a multiple of {multiple_of}"),
+        ValidationErrorKind::Not { .. } => "matches a forbidden schema".to_owned(),
+        ValidationErrorKind::OneOfMultipleValid => "matches more than one allowed schema".to_owned(),
+        ValidationErrorKind::OneOfNotValid => "does not match exactly one allowed schema".to_owned(),
+        ValidationErrorKind::Pattern { .. } => "does not match the required pattern".to_owned(),
+        ValidationErrorKind::PropertyNames { error } => schema_error_reason(&error.kind),
+        ValidationErrorKind::Required { .. } => "is required".to_owned(),
+        ValidationErrorKind::Type { kind } => match kind {
+            TypeKind::Single(expected) => format!("expected {expected}"),
+            TypeKind::Multiple(expected) => {
+                let expected = expected.into_iter().map(|kind| kind.to_string()).collect::<Vec<_>>().join(" or ");
+                format!("expected {expected}")
+            }
+        },
+        ValidationErrorKind::UnevaluatedProperties { unexpected } => {
+            let names = unexpected.iter().take(MAX_SCHEMA_ERRORS).map(|name| format!("`{name}`")).collect::<Vec<_>>().join(", ");
+            format!("unexpected properties: {names}")
+        }
+        ValidationErrorKind::UniqueItems => "contains duplicate items".to_owned(),
+    }
+}
+
+fn sanitize_text(text: &str, max_bytes: usize) -> String {
+    let sanitized = text.chars().map(|ch| if ch.is_control() { ' ' } else { ch }).collect::<String>();
+    clip_utf8(&sanitized, max_bytes).to_owned()
 }
 
 async fn run_indexed(index: usize, ready: Ready, ctx: RunContext, registry: Arc<Registry>, limits: RunLimits, bus: EventBus, step: usize, checkpoints: Checkpoints)
@@ -161,6 +286,39 @@ async fn run_one(ready: Ready, ctx: RunContext, registry: Arc<Registry>, limits:
     }
     if ctx.cancel.is_cancelled() {
         return (ToolResult::new(&call.id, ToolStatus::Skipped, "cancelled after intent, before dispatch"), Some(AgentError::new(ErrorCode::Cancelled, "run cancelled")));
+    }
+    // Intent is not dispatch. A slow checkpoint must not leave a stale policy decision.
+    // Denials and failed checks are settled durably without entering the tool body.
+    for policy in &registry.policies {
+        let operation = ctx.cancel.child_token();
+        let _drop_cancel = CancelOnDrop(operation.clone());
+        let mut policy_ctx = ctx.clone(); policy_ctx.cancel = operation.clone();
+        let decision = bounded(&ctx.cancel, &operation,
+            ctx.task.deadline().min(Instant::now() + limits.hook_timeout), limits.cancellation_grace,
+            policy.check(&policy_ctx, &call, &ready.tool.spec)).await;
+        let (mut result, mut fatal) = match decision {
+            Ok(PolicyDecision::Allow) => continue,
+            Ok(PolicyDecision::Deny(reason)) =>
+                (ToolResult::new(&call.id, ToolStatus::Denied, clip_utf8(&reason, 4096)), None),
+            Err(error) => (ToolResult::new(&call.id, ToolStatus::Skipped,
+                "policy check failed before dispatch; not executed"), Some(error)),
+        };
+        if let Some(error) = cap_result(&mut result, limits.max_tool_result_bytes) { fatal.get_or_insert(error); }
+        if let Err(error) = checkpoints.settled(&result).await { fatal.get_or_insert(error); }
+        bus.complete_tool(step, index, &result);
+        return (result, fatal);
+    }
+    if let Err(error) = ctx.task.check().and_then(|_| {
+        if ctx.cancel.is_cancelled() { Err(AgentError::new(ErrorCode::Cancelled, "cancelled before dispatch")) }
+        else { Ok(()) }
+    }) {
+        let result = ToolResult::new(&call.id, ToolStatus::Skipped, "stopped after policy; not executed");
+        let _ = checkpoints.settled(&result).await;
+        bus.complete_tool(step, index, &result);
+        return (result, Some(error));
+    }
+    if let Err(error) = checkpoints.check().await {
+        return (ToolResult::new(&call.id, ToolStatus::Skipped, "checkpoint failed before dispatch"), Some(error));
     }
     bus.start_tool(step, index);
     let operation = ctx.cancel.child_token();

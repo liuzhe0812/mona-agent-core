@@ -14,12 +14,23 @@ pub struct ToolCall {
 }
 impl ToolCall {
     pub fn new(id: impl Into<String>, name: impl Into<String>, arguments: Value) -> Self {
-        Self { id: id.into(), name: name.into(), arguments, provider_data: None }
+        Self {
+            id: id.into(),
+            name: name.into(),
+            arguments,
+            provider_data: None,
+        }
     }
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum ToolStatus { Success, Error, Denied, Skipped, Unknown }
+pub enum ToolStatus {
+    Success,
+    Error,
+    Denied,
+    Skipped,
+    Unknown,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ArtifactRef {
@@ -30,7 +41,10 @@ pub struct ArtifactRef {
 impl ArtifactRef {
     pub fn validate(&self) -> Result<()> {
         if self.uri.is_empty() || self.uri.len() > 4096 || self.uri.chars().any(char::is_control) {
-            return Err(AgentError::new(ErrorCode::Schema, "invalid artifact locator"));
+            return Err(AgentError::new(
+                ErrorCode::Schema,
+                "invalid artifact locator",
+            ));
         }
         Ok(())
     }
@@ -47,13 +61,33 @@ pub struct ToolResult {
     pub artifact: Option<ArtifactRef>,
 }
 impl ToolResult {
-    pub fn new(call_id: impl Into<String>, status: ToolStatus, content: impl Into<Content>) -> Self {
+    pub fn new(
+        call_id: impl Into<String>,
+        status: ToolStatus,
+        content: impl Into<Content>,
+    ) -> Self {
         let content = content.into();
         let original_bytes = content.byte_len();
-        Self { call_id: call_id.into(), status, content, structured: None, truncated: false, original_bytes, artifact: None }
+        Self {
+            call_id: call_id.into(),
+            status,
+            content,
+            structured: None,
+            truncated: false,
+            original_bytes,
+            artifact: None,
+        }
     }
     pub fn from_output(call_id: impl Into<String>, output: ToolOutput) -> Self {
-        let mut result = Self::new(call_id, if output.is_error { ToolStatus::Error } else { ToolStatus::Success }, output.content);
+        let mut result = Self::new(
+            call_id,
+            if output.is_error {
+                ToolStatus::Error
+            } else {
+                ToolStatus::Success
+            },
+            output.content,
+        );
         result.structured = output.structured;
         result.artifact = output.artifact;
         result.original_bytes = result.payload_bytes();
@@ -61,20 +95,36 @@ impl ToolResult {
     }
     pub fn validate(&self) -> Result<()> {
         self.content.validate()?;
-        if let Some(artifact) = &self.artifact { artifact.validate()?; }
+        if let Some(artifact) = &self.artifact {
+            artifact.validate()?;
+        }
         Ok(())
     }
     pub fn payload_bytes(&self) -> usize {
-        self.content.byte_len().saturating_add(self.structured.as_ref().map_or(0, |v| serde_json::to_vec(v).map_or(usize::MAX, |s| s.len())))
-            .saturating_add(self.artifact.as_ref().map_or(0, |v| serde_json::to_vec(v).map_or(usize::MAX, |s| s.len())))
+        self.content
+            .byte_len()
+            .saturating_add(
+                self.structured
+                    .as_ref()
+                    .map_or(0, |v| serde_json::to_vec(v).map_or(usize::MAX, |s| s.len())),
+            )
+            .saturating_add(
+                self.artifact
+                    .as_ref()
+                    .map_or(0, |v| serde_json::to_vec(v).map_or(usize::MAX, |s| s.len())),
+            )
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "role", rename_all = "snake_case")]
 pub enum Message {
-    System { content: String },
-    User { content: Content },
+    System {
+        content: String,
+    },
+    User {
+        content: Content,
+    },
     Assistant {
         content: String,
         tool_calls: Vec<ToolCall>,
@@ -84,11 +134,21 @@ pub enum Message {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider_data: Option<ProviderData>,
     },
-    Tool { result: ToolResult },
+    Tool {
+        result: ToolResult,
+    },
 }
 impl Message {
-    pub fn user(content: impl Into<Content>) -> Self { Self::User { content: content.into() } }
-    pub fn system(content: impl Into<String>) -> Self { Self::System { content: content.into() } }
+    pub fn user(content: impl Into<Content>) -> Self {
+        Self::User {
+            content: content.into(),
+        }
+    }
+    pub fn system(content: impl Into<String>) -> Self {
+        Self::System {
+            content: content.into(),
+        }
+    }
     pub fn text(&self) -> Cow<'_, str> {
         match self {
             Self::System { content } | Self::Assistant { content, .. } => Cow::Borrowed(content),
@@ -100,6 +160,8 @@ impl Message {
 /// Byte limit with a UTF-8 boundary. A caller must separately mark truncation.
 pub fn clip_utf8(text: &str, bytes: usize) -> &str {
     let mut end = text.len().min(bytes);
-    while !text.is_char_boundary(end) { end -= 1; }
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
     &text[..end]
 }

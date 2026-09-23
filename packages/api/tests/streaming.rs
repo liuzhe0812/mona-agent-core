@@ -47,9 +47,9 @@ fn streaming_wire_roundtrip_preserves_item_identity() {
     assert!(matches!(restored.event, RunEvent::ItemStarted { item } if item.id == "step-2-tool-3"));
 }
 #[test]
-fn limits_keep_all_in_flight_items_within_snapshot_capacity() {
-    let mut limits = RunLimits::default(); limits.max_tools_per_step = UI_RETAINED_ITEMS;
-    assert!(limits.validate().is_err());
-    limits.max_tools_per_step = UI_RETAINED_ITEMS - 1;
+fn execution_limit_is_independent_from_snapshot_retention() {
+    let mut limits = RunLimits { max_tools_per_step: UI_RETAINED_ITEMS * 2, ..Default::default() };
     assert!(limits.validate().is_ok());
+    limits.max_tools_per_step = MAX_TOOL_CALLS_PER_STEP + 1;
+    assert!(limits.validate().is_err());
 }

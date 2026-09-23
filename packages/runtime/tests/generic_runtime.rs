@@ -117,6 +117,26 @@ async fn tool_selection_obeys_hook_timeout() {
     host.shutdown().await.unwrap();
 }
 
+struct ContextWork;
+#[async_trait]
+impl ContextTransform for ContextWork {
+    async fn transform(&self, _: &RunContext, messages: Vec<Message>) -> Result<Vec<Message>> {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        Ok(messages)
+    }
+}
+#[tokio::test]
+async fn context_work_has_a_separate_deadline_from_short_hooks() {
+    let model = ScriptModel::new(vec![answer("done")]);
+    let mut host = HostBuilder::new().model(model).context_transform(Arc::new(ContextWork)).build().await.unwrap();
+    let mut request = RunRequest::new("go");
+    request.limits.hook_timeout = Duration::from_millis(1);
+    request.limits.context_timeout = Duration::from_millis(50);
+    let report = host.engine().execute(request).await.unwrap();
+    assert_eq!(report.status, RunStatus::Completed);
+    host.shutdown().await.unwrap();
+}
+
 fn image() -> ContentBlock {
     ContentBlock::Image { media_type: "image/png".into(), source: ImageSource::Base64 { data: "AQ==".into() } }
 }
@@ -206,7 +226,7 @@ async fn per_run_model_options_reach_adapter_and_request_audit() {
     request.model_options = ModelOptions { model: Some("configured-model".into()), temperature: Some(0.2), ..Default::default() };
     let report = host.engine().execute(request).await.unwrap();
     assert_eq!(report.status, RunStatus::Completed);
-    assert_eq!(report.model_requests[0].request.options.model.as_deref(), Some("configured-model"));
+    assert_eq!(report.model_requests[0].request.as_ref().unwrap().options.model.as_deref(), Some("configured-model"));
     assert_eq!(model.requests.lock().unwrap()[0].options.temperature, Some(0.2));
     host.shutdown().await.unwrap();
 }

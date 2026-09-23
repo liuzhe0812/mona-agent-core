@@ -1,4 +1,4 @@
-use crate::{Message, Result, ToolCall, ToolSpec, ModelOptions, ProtocolTarget, ProviderData};
+use crate::{Message, ModelOptions, ProtocolTarget, ProviderData, Result, ToolCall, ToolSpec};
 use async_trait::async_trait;
 use futures_util::Stream;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,9 @@ pub struct Usage {
     pub output_tokens: u64,
 }
 impl Usage {
-    pub fn total(&self) -> u64 { self.input_tokens.saturating_add(self.output_tokens) }
+    pub fn total(&self) -> u64 {
+        self.input_tokens.saturating_add(self.output_tokens)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -25,15 +27,28 @@ pub struct ModelRequest {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum FinishReason { Stop, ToolCalls, Length, Filtered }
+pub enum FinishReason {
+    Stop,
+    ToolCalls,
+    Length,
+    Filtered,
+}
 
 #[derive(Clone, Debug)]
 pub enum ModelEvent {
     Text(String),
     Reasoning(String),
-    ToolDelta { index: usize, id: Option<String>, name: Option<String>, arguments: String },
+    ToolDelta {
+        index: usize,
+        id: Option<String>,
+        name: Option<String>,
+        arguments: String,
+    },
     /// Complete opaque snapshot for a message/call, not displayable reasoning.
-    ProviderData { target: ProtocolTarget, data: ProviderData },
+    ProviderData {
+        target: ProtocolTarget,
+        data: ProviderData,
+    },
     /// A cumulative snapshot for this request, not a token delta.
     Usage(Usage),
     Finish(FinishReason),
@@ -53,7 +68,12 @@ pub struct ModelReply {
 }
 impl ModelReply {
     pub fn into_message(self) -> Message {
-        Message::Assistant { content: self.content, tool_calls: self.tool_calls, reasoning_content: self.reasoning_content, provider_data: self.provider_data }
+        Message::Assistant {
+            content: self.content,
+            tool_calls: self.tool_calls,
+            reasoning_content: self.reasoning_content,
+            provider_data: self.provider_data,
+        }
     }
 }
 
@@ -62,7 +82,12 @@ pub type ModelStream = Pin<Box<dyn Stream<Item = Result<ModelEvent>> + Send>>;
 /// Raw adapter. Application plugins should use RunContext.model, not this interface.
 #[async_trait]
 pub trait Model: Send + Sync {
-    async fn stream(&self, request: ModelRequest, cancel: CancellationToken) -> Result<ModelStream>;
+    /// Optional capacity for the effective model selected by these options.
+    fn context_window_tokens(&self, _options: &ModelOptions) -> Option<u64> {
+        None
+    }
+    async fn stream(&self, request: ModelRequest, cancel: CancellationToken)
+        -> Result<ModelStream>;
 }
 
 /// Nonblocking observer of a model call. Final correctness comes from ModelReply.
@@ -73,8 +98,23 @@ pub trait ModelSink: Send + Sync {
     fn tool_delta(&self, _index: usize, _id: Option<&str>, _name: Option<&str>, _arguments: &str) {}
 }
 
+/// An occupancy estimate, never a billing record. Appended messages are still estimated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InputTokenEstimate {
+    pub tokens: u64,
+    pub provider_anchored: bool,
+}
+
 /// Budgeted, timed, bounded gateway bound to a Run. Shared by tools and transforms.
 #[async_trait]
 pub trait ModelCaller: Send + Sync {
-    async fn complete(&self, request: ModelRequest, sink: Option<Arc<dyn ModelSink>>) -> Result<ModelReply>;
+    /// Reuse a primary-call usage anchor only for the same effective model/options/tools
+    /// and an unchanged request prefix. Auxiliary calls must never update that anchor.
+    fn estimate_input_tokens(&self, _request: &ModelRequest) -> Option<InputTokenEstimate> { None }
+
+    async fn complete(
+        &self,
+        request: ModelRequest,
+        sink: Option<Arc<dyn ModelSink>>,
+    ) -> Result<ModelReply>;
 }

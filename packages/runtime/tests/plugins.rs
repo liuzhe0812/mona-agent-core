@@ -119,8 +119,8 @@ async fn memory_is_a_projection_and_not_a_transcript_rewrite() {
         .plugin(Arc::new(MemoryPlugin::new(store))).build().await.unwrap();
     let report = host.engine().execute(RunRequest::new("language preference?")).await.unwrap();
     assert_eq!(report.transcript.len(), 2);
-    assert_eq!(report.model_requests[0].request.messages.len(), 2);
-    assert!(report.model_requests[0].request.messages[0].text().contains("Chinese"));
+    assert_eq!(report.model_requests[0].request.as_ref().unwrap().messages.len(), 2);
+    assert!(report.model_requests[0].request.as_ref().unwrap().messages[0].text().contains("Chinese"));
     assert!(!report.transcript.iter().any(|m| m.text().contains("Retrieved reference")));
     host.shutdown().await.unwrap();
 }
@@ -146,7 +146,7 @@ async fn planner_uses_same_executor_and_shared_task_budget() {
     let report = planner.plan_and_execute(&host.engine(), request).await.unwrap();
     assert_eq!(report.status, RunStatus::Limited);
     assert_eq!(model.requests.lock().unwrap().len(), 2);
-    assert!(report.planning_run.model_requests[0].request.tools.is_empty());
+    assert!(report.planning_run.model_requests[0].request.as_ref().unwrap().tools.is_empty());
     host.shutdown().await.unwrap();
 }
 #[tokio::test]

@@ -6,7 +6,10 @@ use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ToolConcurrency { Exclusive, ParallelSafe }
+pub enum ToolConcurrency {
+    Exclusive,
+    ParallelSafe,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolSpec {
@@ -23,7 +26,10 @@ pub trait ToolProgress: Send + Sync {
     fn report(&self, text: &str);
     /// Optional namespaced UI snapshot (plan, diff, etc.). Cannot alter execution status.
     fn set_detail(&self, _key: &str, _value: Value) -> Result<()> {
-        Err(crate::AgentError::new(crate::ErrorCode::Configuration, "structured tool progress is unsupported by this sink"))
+        Err(crate::AgentError::new(
+            crate::ErrorCode::Configuration,
+            "structured tool progress is unsupported by this sink",
+        ))
     }
 }
 #[derive(Clone)]
@@ -51,9 +57,32 @@ pub struct ToolOutput {
     pub is_error: bool,
 }
 impl ToolOutput {
-    pub fn new(content: impl Into<Content>) -> Self { Self { content: content.into(), ..Self::default() } }
-    pub fn error(content: impl Into<Content>) -> Self { Self { content: content.into(), is_error: true, ..Self::default() } }
+    pub fn new(content: impl Into<Content>) -> Self {
+        Self {
+            content: content.into(),
+            ..Self::default()
+        }
+    }
+    pub fn error(content: impl Into<Content>) -> Self {
+        Self {
+            content: content.into(),
+            is_error: true,
+            ..Self::default()
+        }
+    }
 }
-impl From<String> for ToolOutput { fn from(text: String) -> Self { Self::new(text) } }
-impl From<&str> for ToolOutput { fn from(text: &str) -> Self { Self::new(text) } }
-impl From<Content> for ToolOutput { fn from(content: Content) -> Self { Self::new(content) } }
+impl From<String> for ToolOutput {
+    fn from(text: String) -> Self {
+        Self::new(text)
+    }
+}
+impl From<&str> for ToolOutput {
+    fn from(text: &str) -> Self {
+        Self::new(text)
+    }
+}
+impl From<Content> for ToolOutput {
+    fn from(content: Content) -> Self {
+        Self::new(content)
+    }
+}

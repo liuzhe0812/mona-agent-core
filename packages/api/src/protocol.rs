@@ -13,17 +13,31 @@ pub struct ProviderData {
 }
 impl std::fmt::Debug for ProviderData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ProviderData").field("namespace", &self.namespace).field("value", &"<opaque>").finish()
+        f.debug_struct("ProviderData")
+            .field("namespace", &self.namespace)
+            .field("value", &"<opaque>")
+            .finish()
     }
 }
 impl ProviderData {
     pub fn validate(&self) -> Result<()> {
-        if self.namespace.is_empty() || self.namespace.len() > 128
-            || !self.namespace.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')) {
-            return Err(AgentError::new(ErrorCode::Schema, "invalid provider-data namespace"));
+        if self.namespace.is_empty()
+            || self.namespace.len() > 128
+            || !self
+                .namespace
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        {
+            return Err(AgentError::new(
+                ErrorCode::Schema,
+                "invalid provider-data namespace",
+            ));
         }
         if serde_json::to_vec(&self.value).map_or(true, |v| v.len() > MAX_PROVIDER_DATA_BYTES) {
-            return Err(AgentError::new(ErrorCode::Limit, "provider data exceeds its byte limit"));
+            return Err(AgentError::new(
+                ErrorCode::Limit,
+                "provider data exceeds its byte limit",
+            ));
         }
         Ok(())
     }
@@ -43,17 +57,41 @@ pub struct ModelOptions {
 }
 impl ModelOptions {
     pub fn validate(&self) -> Result<()> {
-        if self.model.as_ref().is_some_and(|id| id.is_empty() || id.len() > 512) {
-            return Err(AgentError::new(ErrorCode::Configuration, "invalid model selector"));
+        if self
+            .model
+            .as_ref()
+            .is_some_and(|id| id.is_empty() || id.len() > 512)
+        {
+            return Err(AgentError::new(
+                ErrorCode::Configuration,
+                "invalid model selector",
+            ));
         }
-        if self.temperature.is_some_and(|x| !x.is_finite() || !(0.0..=2.0).contains(&x))
-            || self.top_p.is_some_and(|x| !x.is_finite() || x <= 0.0 || x > 1.0) {
-            return Err(AgentError::new(ErrorCode::Configuration, "invalid generation sampling options"));
+        if self
+            .temperature
+            .is_some_and(|x| !x.is_finite() || !(0.0..=2.0).contains(&x))
+            || self
+                .top_p
+                .is_some_and(|x| !x.is_finite() || x <= 0.0 || x > 1.0)
+        {
+            return Err(AgentError::new(
+                ErrorCode::Configuration,
+                "invalid generation sampling options",
+            ));
         }
-        if self.stop.as_ref().is_some_and(|v| v.len() > 4 || v.iter().any(|s| s.is_empty() || s.len() > 1024)) {
-            return Err(AgentError::new(ErrorCode::Configuration, "stop must have at most 4 nonempty bounded strings"));
+        if self
+            .stop
+            .as_ref()
+            .is_some_and(|v| v.len() > 4 || v.iter().any(|s| s.is_empty() || s.len() > 1024))
+        {
+            return Err(AgentError::new(
+                ErrorCode::Configuration,
+                "stop must have at most 4 nonempty bounded strings",
+            ));
         }
-        if let Some(data) = &self.provider_options { data.validate()?; }
+        if let Some(data) = &self.provider_options {
+            data.validate()?;
+        }
         Ok(())
     }
     pub fn inherit(&self, defaults: &Self) -> Self {
@@ -62,9 +100,15 @@ impl ModelOptions {
             temperature: self.temperature.or(defaults.temperature),
             top_p: self.top_p.or(defaults.top_p),
             stop: self.stop.clone().or_else(|| defaults.stop.clone()),
-            provider_options: self.provider_options.clone().or_else(|| defaults.provider_options.clone()),
+            provider_options: self
+                .provider_options
+                .clone()
+                .or_else(|| defaults.provider_options.clone()),
         }
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProtocolTarget { Assistant, ToolCall { index: usize } }
+pub enum ProtocolTarget {
+    Assistant,
+    ToolCall { index: usize },
+}
