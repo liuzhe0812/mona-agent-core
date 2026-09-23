@@ -231,10 +231,51 @@ try {
     && chatMetrics.userRadius === '12px' && chatMetrics.process === 32 && chatMetrics.activity === 28 && chatMetrics.detailRadius === '8px');
   await screenshot('chat-running-dark');
   await waitPage("document.querySelector('#cancel').hidden", 'fixture task settled', 12000);
-  await evaluate("(() => {const p=document.querySelector('#prompt');p.value='第二轮：验证会话导航';p.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  await evaluate("(() => {const p=document.querySelector('#prompt');p.value='第二轮：验证渲染能力与会话导航';p.dispatchEvent(new Event('input',{bubbles:true}));})()");
   await click('#send');
   await waitPage("document.querySelectorAll('#timeline .turn').length===2", 'second conversation turn rendered', 12000);
+  await waitPage("[...document.querySelectorAll('#timeline .turn')].at(-1)?.querySelector('.assistant-body > .message-text h1')?.textContent==='富内容渲染'", 'renderer answer settled', 12000);
   await waitPage("document.querySelector('#cancel').hidden", 'second fixture task settled', 12000);
+  const renderer = await evaluate(`(() => {
+    const turn=[...document.querySelectorAll('#timeline .turn')].at(-1);
+    const answer=turn.querySelector('.assistant-body > .message-text');
+    return {
+      codeLanguage:answer.querySelector('.message-code-language')?.textContent,
+      codeCollapsed:answer.querySelector('.message-code-block')?.classList.contains('is-collapsed'),
+      highlighted:Boolean(answer.querySelector('.token-keyword')),
+      tasks:answer.querySelectorAll('.message-task-checkbox').length,
+      checked:Boolean(answer.querySelector('.message-task-checkbox:checked')),
+      math:Boolean(answer.querySelector('math.message-math')),
+      mermaid:Boolean(answer.querySelector('.message-mermaid .mermaid-node')),
+      escapedTable:[...answer.querySelectorAll('.message-table td')].some(node=>node.textContent==='A|B'),
+      autoLink:Boolean(answer.querySelector('a[href="https://example.com/docs"]')),
+      rawHtmlSafe:answer.textContent.includes('<img src=x onerror=alert(1)>') && !answer.querySelector('img'),
+      richImage:Boolean(turn.querySelector('.rich-content img[src^="data:image/png;base64,"]')),
+      diff:Boolean(turn.querySelector('.structured-diff .token-add')),
+      artifacts:turn.querySelectorAll('.artifact-viewer').length,
+      fallbackMeta:[...turn.querySelectorAll('.structured-json summary')].some(node=>node.textContent.includes('fixture.meta')),
+    };
+  })()`);
+  check('conversation renderer covers code language/highlight/collapse, task lists, tables, auto-links and safe raw HTML',
+    renderer.codeLanguage === 'rust' && renderer.codeCollapsed && renderer.highlighted && renderer.tasks === 2
+      && renderer.checked && renderer.escapedTable && renderer.autoLink && renderer.rawHtmlSafe);
+  check('conversation renderer covers math and Mermaid diagrams', renderer.math && renderer.mermaid);
+  check('tool rendering covers rich images, registered diff details, safe JSON fallback and artifact cards',
+    renderer.richImage && renderer.diff && renderer.artifacts >= 2 && renderer.fallbackMeta);
+  await evaluate("(() => {const turn=[...document.querySelectorAll('#timeline .turn')].at(-1);turn.querySelector('.code-expand').click();})()");
+  check('long code blocks can be expanded without replacing the conversation', await evaluate("![...document.querySelectorAll('#timeline .turn')].at(-1).querySelector('.message-code-block').classList.contains('is-collapsed')"));
+  await evaluate("(() => {const turn=[...document.querySelectorAll('#timeline .turn')].at(-1);[...turn.querySelectorAll('.artifact-viewer button')].find(node=>node.textContent==='读取内容')?.click();})()");
+  await waitPage("[...document.querySelectorAll('#timeline .turn')].at(-1).querySelector('.artifact-output:not([hidden])')?.textContent.includes('fixture')", 'artifact viewer loaded a trusted page');
+  check('artifact viewer pages complete retained content through the authenticated host', true);
+  check('incremental Markdown reconciliation preserves stable completed prefix blocks', await evaluate(`(async()=>{
+    const {renderMessage}=await import('/apps/web/content-renderer.mjs');
+    const host=document.createElement('div');
+    renderMessage(host,'# 稳定标题\\n\\n第一段');
+    const heading=host.firstElementChild;
+    renderMessage(host,'# 稳定标题\\n\\n第一段继续\\n\\n第二段');
+    return host.firstElementChild===heading && host.textContent.includes('第二段');
+  })()`));
+  await screenshot('conversation-renderer-dark');
   await waitPage("!document.querySelector('#conversation-rail').hidden && document.querySelectorAll('.conversation-rail-mark').length===2", 'conversation rail visible');
   check('conversation rail renders uniform compact markers with one active reading marker', await evaluate("(() => {const marks=[...document.querySelectorAll('.conversation-rail-mark')], widths=marks.map(mark=>getComputedStyle(mark,'::before').width);return marks.length===2 && document.querySelectorAll('.conversation-rail-mark.is-active').length===1 && widths.every(width=>width==='8px');})()"));
   const railPoint = await evaluate("(() => {const r=document.querySelector('.conversation-rail-mark:first-child').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()");

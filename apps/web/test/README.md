@@ -79,7 +79,7 @@ node apps/web/test/sessions-e2e.mjs
 
 使用真实 Rust 宿主、正式 Web UI、受控本地模型和真实 `read` 工具。覆盖新会话保存、URL、进程重启恢复、真实历史续聊、重命名、搜索、新会话隔离、删除、异常中断、持久请求去重。任务列表同时验证平时状态（标题 + 相对时间）、时间与行内操作共用同一槽位且互斥、行内操作为置顶与 `⋯`、右键与 `⋯` 打开同一个五项菜单（重命名 / 置顶聊天 / 归档 / 标记为未读 / 删除，每项带线条图标，删除在最后且为危险色）、Esc 关闭菜单、置顶在宿主落盘并反映为按下状态、归档把任务移出当前列表且可由分组菜单的已归档视图恢复、未读圆点在未悬停时可见、打开任务后宿主未读标记被清除，以及执行中任务在标题前显示转圈指示：转圈确实在转动（比较两次计算后的 transform）、相对时间保留、任务结束后指示隐藏且标题横向位置不变（行节点复用，行刷新不会让动画重头开始）；并把任务行、任务行操作、任务分组、执行中状态和菜单放大截图保存为 `task-row-resting-zoom.png`、`task-row-hover-zoom.png`、`task-row-actions-zoom.png`、`task-header-zoom.png`、`task-running-zoom.png`、`task-menu.png`。工作空间、状态目录、端口和浏览器 profile 均隔离。
 
-报告和截图位于 `.tmp-verify/session-browser-report/`。该流程使用真实宿主和工具，但仍不调用真实外部供应商。
+报告和截图默认位于 `target/browser-reports/sessions/`，可由 `MONA_TEST_REPORT_DIR` 指定。该流程使用真实宿主和工具，但仍不调用真实外部供应商。
 
 ## 8. 上下文与长会话真实宿主验收
 
@@ -90,7 +90,9 @@ node apps/web/test/context-e2e.mjs
 
 使用单独的构建目录，避免替换正在运行的开发 server.exe。测试从空模型设置和空会话目录启动，通过正式页面设置模型窗口，再核对压缩、Skills/项目规则来源与真实用户锚点、跨 Run/宿主重启的摘要复用、完整历史保留、规则文件变更，以及真实 shell/Spill/read 归档在同会话后续 Run 和重启后可读、其他会话不可通过 URI 获得授权。它不读取仓库 `.env`，不使用真实供应商，进程和磁盘数据均为本测试创建。
 
-可通过 `MONA_TEST_SERVER` 指定其他已构建的隔离二进制。报告和截图位于 `.tmp-verify/context-browser-report/`。完整设计与边界见[上下文管理](../../../docs/CONTEXT-MANAGEMENT.zh-CN.md)。
+可通过 `MONA_TEST_SERVER` 指定其他已构建的隔离二进制。报告和截图默认位于 `target/browser-reports/context/`，可由 `MONA_TEST_REPORT_DIR` 指定。完整设计与边界见[上下文管理](../../../docs/CONTEXT-MANAGEMENT.zh-CN.md)。
+
+该场景特意让服务启动目录不同于 `AGENT_WORKSPACE_DIR`，并在启动目录放置不可加载的 Skills 夹具，验证发现只使用配置工作空间；未配置 `AGENT_SKILL_DIRS` 的默认装配同样经过真实宿主验证。
 
 ## 9. 浏览器与证据边界
 

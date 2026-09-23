@@ -1,3 +1,5 @@
+import { artifactViewer, renderMessage, richContentBlock, structuredDetailsBlock } from './content-renderer.mjs';
+
 // Presentation only: all work items and outcomes come from the shared RunView.
 const states = { pending: '等待', running: '执行中', completed: '完成', failed: '失败', cancelled: '已取消', denied: '已拒绝', skipped: '已跳过', unknown: '状态未知' };
 export const statusText = state => states[state] || state;
@@ -44,184 +46,6 @@ export function relativeTime(value, now = Date.now()) {
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}小时`;
   const days = Math.floor(seconds / 86400);
   return days < 30 ? `${days}天` : new Date(at).toLocaleDateString();
-}
-
-// Deliberately small Markdown subset. Every node is built through the DOM, so model output is never HTML.
-const INLINE_PATTERN = /(`[^`\n]+`|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\n]+\*|\[[^\]\n]*\]\([^)\s]+\))/g;
-const SAFE_LINK = /^(?:https?:|mailto:)/i;
-const TABLE_DELIMITER = /^\s*\|?[\s:|-]+\|[\s:|-]*$/;
-
-function appendInline(parent, value) {
-  let end = 0;
-  for (const match of value.matchAll(INLINE_PATTERN)) {
-    parent.append(document.createTextNode(value.slice(end, match.index)));
-    const token = match[0];
-    if (token.startsWith('`')) parent.append(text('code', '', token.slice(1, -1)));
-    else if (token.startsWith('**')) parent.append(text('strong', '', token.slice(2, -2)));
-    else if (token.startsWith('~~')) parent.append(text('del', '', token.slice(2, -2)));
-    else if (token.startsWith('*')) parent.append(text('em', '', token.slice(1, -1)));
-    else {
-      const [, label, href] = /^\[([^\]]*)\]\(([^)\s]+)\)$/.exec(token);
-      if (!SAFE_LINK.test(href)) parent.append(document.createTextNode(token));
-      else {
-        const anchor = text('a', '', label || href);
-        anchor.href = href;
-        anchor.rel = 'noopener noreferrer';
-        anchor.target = '_blank';
-        parent.append(anchor);
-      }
-    }
-    end = match.index + token.length;
-  }
-  parent.append(document.createTextNode(value.slice(end)));
-}
-
-function inlineBlock(tag, content) {
-  const element = text(tag, '');
-  appendInline(element, content);
-  return element;
-}
-
-function splitRow(line) {
-  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
-}
-
-function tableAlignments(delimiter) {
-  return splitRow(delimiter).map(cell => {
-    const left = cell.startsWith(':');
-    const right = cell.endsWith(':');
-    return left && right ? 'center' : right ? 'right' : left ? 'left' : '';
-  });
-}
-
-function tableBlock(head, rows, alignments) {
-  const wrap = text('div', 'message-table');
-  const table = document.createElement('table');
-  const headRow = document.createElement('tr');
-  head.forEach((cell, column) => {
-    const th = inlineBlock('th', cell);
-    if (alignments[column]) th.className = `align-${alignments[column]}`;
-    headRow.append(th);
-  });
-  const thead = document.createElement('thead');
-  thead.append(headRow);
-  table.append(thead);
-  if (rows.length) {
-    const tbody = document.createElement('tbody');
-    for (const row of rows) {
-      const tr = document.createElement('tr');
-      head.forEach((_, column) => {
-        const td = inlineBlock('td', row[column] ?? '');
-        if (alignments[column]) td.className = `align-${alignments[column]}`;
-        tr.append(td);
-      });
-      tbody.append(tr);
-    }
-    table.append(tbody);
-  }
-  wrap.append(table);
-  return wrap;
-}
-
-export function renderMessage(node, value) {
-  node.replaceChildren();
-  const lines = String(value ?? '').split('\n');
-  const lists = [];
-  let paragraph = null, quote = null, quoteParagraph = null;
-  const reset = () => { paragraph = null; quote = null; quoteParagraph = null; lists.length = 0; };
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (/^\s*(?:```|~~~)/.test(line)) {
-      const body = [];
-      index += 1;
-      while (index < lines.length && !/^\s*(?:```|~~~)\s*$/.test(lines[index])) { body.push(lines[index]); index += 1; }
-      const pre = text('pre', 'message-code');
-      pre.append(text('code', '', body.length ? `${body.join('\n')}\n` : ''));
-      node.append(pre);
-      reset();
-      continue;
-    }
-    // A blank line ends the open paragraph and quote but keeps a list going, so loose lists stay one list.
-    if (!line.trim()) { paragraph = null; quote = null; quoteParagraph = null; continue; }
-
-    const quoted = /^\s*>\s?(.*)$/.exec(line);
-    if (quoted) {
-      if (!quote) { quote = text('blockquote', ''); quoteParagraph = null; lists.length = 0; node.append(quote); }
-      if (quoted[1].trim()) {
-        if (!quoteParagraph) { quoteParagraph = document.createElement('p'); quote.append(quoteParagraph); }
-        else quoteParagraph.append(document.createElement('br'));
-        appendInline(quoteParagraph, quoted[1]);
-      } else quoteParagraph = null;
-      paragraph = null;
-      continue;
-    }
-
-    const heading = /^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/.exec(line);
-    if (heading) { node.append(inlineBlock(`h${heading[1].length}`, heading[2])); reset(); continue; }
-
-    const underline = /^\s*(=+|-+)\s*$/.exec(line);
-    if (paragraph && underline && !paragraph.querySelector('br')) {
-      paragraph.replaceWith(inlineBlock(underline[1][0] === '=' ? 'h1' : 'h2', paragraph.textContent));
-      reset();
-      continue;
-    }
-    if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { node.append(text('hr', 'message-rule')); reset(); continue; }
-
-    const item = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line);
-    if (item) {
-      const indent = item[1].replace(/\t/g, '  ').length;
-      const tag = /\d/.test(item[2]) ? 'ol' : 'ul';
-      while (lists.length && lists.at(-1).indent > indent) lists.pop();
-      let level = lists.at(-1);
-      if (!level || (level.indent < indent && level.item)) {
-        const nested = document.createElement(tag);
-        if (level) level.item.append(nested);
-        else node.append(nested);
-        level = { node: nested, indent, tag, item: null };
-        lists.push(level);
-      } else if (level.tag !== tag) {
-        const sibling = document.createElement(tag);
-        level.node.after(sibling);
-        level = { node: sibling, indent, tag, item: null };
-        lists[lists.length - 1] = level;
-      }
-      if (tag === 'ol' && !level.node.childElementCount) {
-        const start = Number.parseInt(item[2], 10);
-        if (start > 1) level.node.start = start;
-      }
-      const li = document.createElement('li');
-      appendInline(li, item[3]);
-      level.node.append(li);
-      level.item = li;
-      paragraph = null; quote = null; quoteParagraph = null;
-      continue;
-    }
-    // Continuation lines of an indented list item belong to that item.
-    const indent = /^\s*/.exec(line)[0].replace(/\t/g, '  ').length;
-    if (lists.length && indent > lists.at(-1).indent && lists.at(-1).item) {
-      lists.at(-1).item.append(document.createElement('br'));
-      appendInline(lists.at(-1).item, line.trim());
-      continue;
-    }
-
-    if (line.includes('|') && index + 1 < lines.length && TABLE_DELIMITER.test(lines[index + 1]) && lines[index + 1].includes('-')) {
-      const alignments = tableAlignments(lines[index + 1]);
-      const head = splitRow(line);
-      index += 2;
-      const rows = [];
-      while (index < lines.length && lines[index].trim() && lines[index].includes('|')) { rows.push(splitRow(lines[index])); index += 1; }
-      index -= 1;
-      node.append(tableBlock(head, rows, alignments));
-      reset();
-      continue;
-    }
-
-    lists.length = 0; quote = null; quoteParagraph = null;
-    if (!paragraph) { paragraph = document.createElement('p'); node.append(paragraph); }
-    else paragraph.append(document.createElement('br'));
-    appendInline(paragraph, line);
-  }
 }
 
 export function partitionItems(state) {
@@ -349,7 +173,8 @@ function syncChildren(container, nodes) {
 function hasDetail(item) {
   const content = item.content;
   if (content.kind !== 'tool_call') return Boolean(content.text);
-  return Boolean(content.arguments_text || content.arguments != null || content.output || content.result);
+  return Boolean(content.arguments_text || content.arguments != null || content.output || content.result
+    || (content.details && Object.keys(content.details).length));
 }
 
 function createItemEntry(item) {
@@ -388,35 +213,8 @@ function createGroupEntry() {
   return group;
 }
 
-// Expanded tool detail: tool name, command or arguments, log, bounded result and the outcome mark.
-function artifactBlock(artifact, runId, readArtifact) {
-  const block = text('div', 'activity-panel-artifact');
-  if (!readArtifact || !String(artifact.uri || '').startsWith('spill:')) {
-    block.append(text('p', 'muted-note', `完整结果位置：${artifact.uri}`));
-    return block;
-  }
-  const output = text('pre', 'activity-panel-output', ''); output.hidden = true;
-  const note = text('p', 'muted-note', `完整结果 ${artifact.bytes} 字节，保存在宿主私有归档中。`);
-  const button = text('button', 'text-button', '读取完整结果'); button.type = 'button';
-  let offset = 0;
-  button.addEventListener('click', async () => {
-    button.disabled = true; note.textContent = '正在读取完整结果…';
-    try {
-      const page = await readArtifact(runId, artifact.uri, offset);
-      output.hidden = false; output.append(document.createTextNode(page.text));
-      offset = page.next_offset;
-      button.textContent = page.eof ? '已读取完整结果' : '读取下一页';
-      button.disabled = page.eof;
-      note.textContent = `已读取 ${offset} / ${page.total_bytes} 字节。`;
-    } catch (error) {
-      button.disabled = false; note.textContent = error?.message || '读取完整结果失败。';
-    }
-  });
-  block.append(note, button, output);
-  return block;
-}
-
-function toolPanel(item, runId, readArtifact) {
+// Expanded tool detail: command/arguments, progress, rich result, artifact and structured UI details.
+function toolPanel(item, runId, artifactReader) {
   const content = item.content;
   const kind = toolKind(content.name);
   const clean = value => (kind === 'shell' && typeof value === 'string' ? value.replace(ANSI_SEQUENCE, '') : value);
@@ -434,25 +232,34 @@ function toolPanel(item, runId, readArtifact) {
   if (content.output_truncated) panel.append(text('p', 'muted-note', '执行输出过长，已截断显示。'));
   if (content.result) {
     const resultText = clean(content.result.content) || '';
-    // The bounded result and the log preview are separate protocol fields, but repeating one text twice hides nothing.
-    if (resultText.trim() && resultText.trim() !== output.trim()) panel.append(text('pre', 'activity-panel-result', resultText));
-    if (content.result.truncated) panel.append(text('p', 'muted-note', '结果过长，已截断显示。'));
-    if (content.result.artifact) panel.append(artifactBlock(content.result.artifact, runId, readArtifact));
+    if (Array.isArray(content.result.blocks) && content.result.blocks.length) {
+      panel.append(richContentBlock(content.result.blocks, { runId, artifactReader }));
+    } else if (resultText.trim() && resultText.trim() !== output.trim()) {
+      panel.append(text('pre', 'activity-panel-result', resultText));
+    }
+    if (content.result.truncated) panel.append(text('p', 'muted-note',
+      content.result.redacted ? '部分媒体或资源定位信息已由宿主隐藏。' : '结果过长，已截断显示。'));
+    if (content.result.artifact) panel.append(artifactViewer(content.result.artifact, { runId, artifactReader }));
   }
+  const details = structuredDetailsBlock(content.details);
+  if (details) panel.append(details);
   if (!panel.childElementCount) panel.append(text('p', 'muted-note', '尚无执行结果。'));
   return panel;
 }
 
-function messagePanel(item) {
-  const panel = text('div', 'activity-panel');
-  const body = text('div', 'message-text');
-  renderMessage(body, item.content.text || '等待回复…');
-  panel.append(body);
-  if (item.content.truncated) panel.append(text('p', 'muted-note', '消息过长，已截断显示。'));
-  return panel;
+function updateMessagePanel(entry, item) {
+  if (!entry.messagePanel) {
+    entry.messagePanel = text('div', 'activity-panel');
+    entry.messageText = text('div', 'message-text');
+    entry.messageTruncated = text('p', 'muted-note', '消息过长，已截断显示。');
+    entry.messagePanel.append(entry.messageText, entry.messageTruncated);
+    entry.body.replaceChildren(entry.messagePanel);
+  }
+  renderMessage(entry.messageText, item.content.text || '等待回复…');
+  entry.messageTruncated.hidden = !item.content.truncated;
 }
 
-function updateItem(entry, item, runId, readArtifact) {
+function updateItem(entry, item, runId, artifactReader) {
   const content = item.content, tool = content.kind === 'tool_call';
   const kind = tool ? toolKind(content.name) : 'message';
   const preview = tool ? previewOf(content) : previewLine(content.text);
@@ -471,17 +278,26 @@ function updateItem(entry, item, runId, readArtifact) {
   const signature = JSON.stringify(content);
   if (signature === entry.signature) return;
   entry.signature = signature;
-  entry.body.replaceChildren(tool ? toolPanel(item, runId, readArtifact) : messagePanel(item));
+  if (tool) {
+    entry.messagePanel = null;
+    entry.body.replaceChildren(toolPanel(item, runId, artifactReader));
+  } else updateMessagePanel(entry, item);
 }
 
 export class TurnView {
-  constructor(userText, { readArtifact } = {}) {
+  constructor(userText, { artifactReader } = {}) {
     this.startedAt = performance.now();
     this.endedAt = null;
     this.entries = new Map();
     this.groups = new Map();
     this.processAutoOpened = false;
-    this.readArtifact = readArtifact;
+    this.artifactReader = artifactReader;
+    this.renderedAnswer = undefined;
+    this.renderedTruncated = false;
+    this.pendingAnswer = '';
+    this.pendingTruncated = false;
+    this.answerRenderTimer = 0;
+    this.lastAnswerRenderAt = 0;
     this.turn = text('article', 'turn');
     this.process = text('details', 'execution-process');
     this.summary = text('summary', 'execution-summary');
@@ -504,7 +320,32 @@ export class TurnView {
     this.clock.textContent = `${this.endedAt == null ? '正在工作' : '已工作'} ${durationText((this.endedAt ?? performance.now()) - this.startedAt)}`;
   }
 
+  flushAnswer() {
+    if (this.answerRenderTimer) clearTimeout(this.answerRenderTimer);
+    this.answerRenderTimer = 0;
+    if (this.pendingAnswer === this.renderedAnswer && this.pendingTruncated === this.renderedTruncated) return;
+    renderMessage(this.answer, this.pendingAnswer);
+    this.answer.querySelector('.message-truncated-note')?.remove();
+    if (this.pendingTruncated) this.answer.append(text('p', 'muted-note message-truncated-note', '消息过长，已截断显示。'));
+    this.renderedAnswer = this.pendingAnswer;
+    this.renderedTruncated = this.pendingTruncated;
+    this.lastAnswerRenderAt = performance.now();
+  }
+
+  queueAnswer(answer, truncated, immediate = false) {
+    this.pendingAnswer = answer;
+    this.pendingTruncated = Boolean(truncated);
+    const elapsed = performance.now() - this.lastAnswerRenderAt;
+    if (immediate || !answer || this.renderedAnswer === undefined || elapsed >= 90) {
+      this.flushAnswer();
+      return;
+    }
+    if (!this.answerRenderTimer) this.answerRenderTimer = setTimeout(() => this.flushAnswer(), Math.max(1, 90 - elapsed));
+  }
+
   fail(message) {
+    if (this.answerRenderTimer) clearTimeout(this.answerRenderTimer);
+    this.answerRenderTimer = 0;
     this.endedAt ??= performance.now();
     this.tick();
     this.process.classList.remove('is-running');
@@ -525,7 +366,7 @@ export class TurnView {
       const entries = block.items.map(item => {
         let entry = this.entries.get(item.id);
         if (!entry) { entry = createItemEntry(item); this.entries.set(item.id, entry); }
-        updateItem(entry, item, state.run_id, this.readArtifact);
+        updateItem(entry, item, state.run_id, this.artifactReader);
         return entry;
       });
       if (!block.key) { topLevel.push(entries[0].node); continue; }
@@ -558,11 +399,7 @@ export class TurnView {
     }
     this.pruned.hidden = !state.pruned_items;
     this.pruned.textContent = `较早的 ${state.pruned_items} 个显示项已从视图裁剪。`;
-    if (answer !== this.lastAnswer || truncated !== this.lastTruncated) {
-      renderMessage(this.answer, answer);
-      if (truncated) this.answer.append(text('p', 'muted-note', '消息过长，已截断显示。'));
-      this.lastAnswer = answer; this.lastTruncated = truncated;
-    }
+    this.queueAnswer(answer, truncated, Boolean(state.outcome));
     this.answer.hidden = !answer;
     if (state.outcome) {
       this.process.open = false;

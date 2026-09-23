@@ -116,7 +116,7 @@ try {
   await evaluate("document.querySelector('#theme-mode-dark').focus()");
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 });
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 });
-  check('native radio groups support keyboard selection and a visible focus ring', await evaluate("document.documentElement.dataset.theme==='light' && document.activeElement.id==='theme-mode-light' && getComputedStyle(document.activeElement.nextElementSibling).outlineStyle!=='none'"));
+  check('native radio groups support keyboard selection and a visible selected state', await evaluate("document.documentElement.dataset.theme==='light' && document.activeElement.id==='theme-mode-light' && document.activeElement.checked && getComputedStyle(document.activeElement.nextElementSibling).backgroundColor!=='rgba(0, 0, 0, 0)'"));
   await chooseMode('system');
   await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
   await waitPage("document.documentElement.dataset.theme==='dark'", 'system dark change');

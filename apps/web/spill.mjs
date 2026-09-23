@@ -11,6 +11,7 @@ export class SpillClient {
 
   clear() { this.#baseUrl = ''; this.#bearer = ''; }
   get configured() { return Boolean(this.#baseUrl && this.#bearer); }
+  supports(artifactUri) { return /^spill:sp_[A-Za-z0-9_]{1,93}$/.test(String(artifactUri || '')); }
 
   async readPage(runId, artifactUri, offset = 0, limit = 16 * 1024) {
     if (!this.configured) throw new Error('完整结果读取仅支持已连接的 HTTP Runtime。');

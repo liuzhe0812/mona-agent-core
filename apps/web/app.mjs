@@ -814,9 +814,7 @@ function text(tag, className, value) {
 
 function createTurn(userText) {
   welcome.hidden = true;
-  const dom = new TurnView(userText, {
-    readArtifact: (runId, uri, offset) => spillResults.readPage(runId, uri, offset),
-  });
+  const dom = new TurnView(userText, { artifactReader: spillResults });
   timeline.append(dom.turn);
   main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
   return dom;

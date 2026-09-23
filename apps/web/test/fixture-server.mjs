@@ -60,14 +60,16 @@ function clone(value) {
   return structuredClone(value);
 }
 
-function toolResult(callId, status, content) {
+function toolResult(callId, status, content, extras = {}) {
   return {
     call_id: callId,
     status,
     content,
+    blocks: extras.blocks ?? null,
+    redacted: false,
     truncated: false,
     original_bytes: encoder.encode(content).length,
-    artifact: null,
+    artifact: extras.artifact ?? null,
   };
 }
 
@@ -95,7 +97,7 @@ function toolItem(run, index, state, content) {
       output: content.output ?? '',
       output_truncated: false,
       result: content.result ?? null,
-      details: {},
+      details: content.details ?? {},
     },
   };
 }
@@ -222,15 +224,66 @@ function longCommand() {
   return `node -e "console.log(${JSON.stringify(payload)})"`;
 }
 
+const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9WlGQAAAAASUVORK5CYII=';
+const RENDERER_DIFF = {
+  path: 'src/example.rs',
+  edits: 1,
+  bytes: 42,
+  summary: 'Updated renderer fixture.',
+  diff: '--- a/src/example.rs\n+++ b/src/example.rs\n@@ -1 +1 @@\n-old_value\n+new_value',
+  diffTruncated: false,
+  firstChangedLine: 1,
+};
+const RENDERER_MARKDOWN = [
+  '# 富内容渲染',
+  '',
+  '**粗体包含 _嵌套斜体_**，转义竖线：\\|，自动链接 https://example.com/docs 。',
+  '',
+  '- [x] 已完成任务',
+  '- [ ] 待完成任务',
+  '',
+  '| 名称 | 值 |',
+  '| --- | ---: |',
+  '| A\\|B | 42 |',
+  '',
+  '> 引用第一层',
+  '> > 引用第二层',
+  '',
+  '```rust',
+  'fn main() {',
+  ...Array.from({ length: 20 }, (_, index) => `    let value_${index + 1} = ${index + 1};`),
+  '    println!("done");',
+  '}',
+  '```',
+  '',
+  '$$\\frac{a_1 + b^2}{\\sqrt{c}} \\le 42$$',
+  '',
+  '```mermaid',
+  'flowchart LR',
+  'A[开始] -->|执行| B{检查}',
+  'B --> C[完成]',
+  '```',
+  '',
+  '安全文本：<img src=x onerror=alert(1)>',
+].join('\n');
+const SPILL_FIXTURES = new Map([
+  ['sp_fixture_resource', 'fixture resource content from trusted host\n'],
+  ['sp_fixture_log', 'fixture archived output line 1\nfixture archived output line 2\n'],
+]);
+
 function scheduleTool(run, index, { failed = false, delay = 0 } = {}) {
   const callId = `fixture-call-${index}`;
-  const name = index === 1 ? 'read_file' : 'exec_command';
+  const renderer = run.mode === 'renderer';
+  const name = renderer ? (index === 1 ? 'read' : 'edit') : (index === 1 ? 'read_file' : 'exec_command');
   const args = index === 1
     ? { path: 'README.md', purpose: '本地 UI 测试数据：读取参考文件' }
-    : { command: longCommand(), cwd: 'D:\\mona-ui-fixture', purpose: '本地 UI 测试数据：验证长参数展开' };
+    : renderer ? { path: 'src/example.rs', edits: [{ oldText: 'old_value', newText: 'new_value' }] }
+      : { command: longCommand(), cwd: 'D:\\mona-ui-fixture', purpose: '本地 UI 测试数据：验证长参数展开' };
   const output = failed
     ? '本地 UI 测试数据：工具故意失败。'
-    : index === 1
+    : renderer && index === 1 ? '本地 UI 测试数据：返回图片和资源。'
+      : renderer ? '本地 UI 测试数据：文件已修改。'
+      : index === 1
       ? '本地 UI 测试数据：README.md 已读取。'
       : '本地 UI 测试数据：命令输出已回放。';
   schedule(run, delay, () => {
@@ -246,6 +299,18 @@ function scheduleTool(run, index, { failed = false, delay = 0 } = {}) {
     schedule(run, 650, () => {
       emit(run, { type: 'item/toolCall/outputDelta', item_id: itemId, text: output });
       schedule(run, 250, () => {
+        const result = renderer && index === 1
+          ? toolResult(callId, 'success', '[image: image/png]\n[resource: text/plain]', {
+            blocks: [
+              { type: 'image', media_type: 'image/png', source: { kind: 'base64', data: TINY_PNG } },
+              { type: 'resource', bytes: encoder.encode(SPILL_FIXTURES.get('sp_fixture_resource')).length, media_type: 'text/plain', name: 'fixture.txt', reference: { uri: 'spill:sp_fixture_resource', bytes: encoder.encode(SPILL_FIXTURES.get('sp_fixture_resource')).length } },
+            ],
+          })
+          : renderer
+            ? toolResult(callId, 'success', 'Successfully replaced 1 block in src/example.rs.', {
+              artifact: { uri: 'spill:sp_fixture_log', bytes: encoder.encode(SPILL_FIXTURES.get('sp_fixture_log')).length },
+            })
+            : toolResult(callId, failed ? 'error' : 'success', output);
         emit(run, {
           type: 'item/completed',
           item: toolItem(run, index, failed ? 'failed' : 'completed', {
@@ -254,7 +319,8 @@ function scheduleTool(run, index, { failed = false, delay = 0 } = {}) {
             arguments: args,
             arguments_text: JSON.stringify(args, null, 2),
             output,
-            result: toolResult(callId, failed ? 'error' : 'success', output),
+            result,
+            details: renderer && index === 2 ? { 'coding.diff': RENDERER_DIFF, 'fixture.meta': { source: 'local' } } : {},
           }),
         });
       });
@@ -304,7 +370,8 @@ function finishSuccess(run) {
   emit(run, { type: 'step/completed', step: run.step });
   run.step = 2;
   emit(run, {type: 'step/started', step: 2});
-  const finalText = '本地 UI 测试数据：任务已完成。\n\n已检查文件与执行输出，执行过程可以展开，每个步骤也可以单独查看。\n\n1. 保留真实事件的先后顺序。\n2. 流式更新保持展开状态。\n3. 最终回复显示在过程区之外。\n\n纯文本检查：<img src=x onerror=alert(1)>';
+  const finalText = run.mode === 'renderer' ? RENDERER_MARKDOWN
+    : '本地 UI 测试数据：任务已完成。\n\n已检查文件与执行输出，执行过程可以展开，每个步骤也可以单独查看。\n\n1. 保留真实事件的先后顺序。\n2. 流式更新保持展开状态。\n3. 最终回复显示在过程区之外。\n\n纯文本检查：<img src=x onerror=alert(1)>';
   const final = messageItem(run, 'running');
   schedule(run, 350, () => {
     emit(run, { type: 'item/started', item: final });
@@ -323,7 +390,7 @@ function createRun(prompt, requestId) {
     runId: `fixture-${randomUUID()}`,
     requestId,
     prompt,
-    mode: prompt.includes('长任务') ? 'long' : prompt.includes('失败') ? 'failed' : 'normal',
+    mode: prompt.includes('渲染能力') ? 'renderer' : prompt.includes('长任务') ? 'long' : prompt.includes('失败') ? 'failed' : 'normal',
     step: 1,
     nextSeq: 1,
     events: [],
@@ -434,6 +501,28 @@ async function handleApiRequest(request, response) {
   if (url.pathname === '/api/capabilities' && request.method === 'GET') {
     if (request.uiFixtureManagement) sendJson(request, response, 200, clone(CAPABILITIES_FIXTURE));
     else sendError(request, response, 404, 'not_found', '组件与工具管理接口未安装。');
+    return;
+  }
+  const spillMatch = url.pathname.match(/^\/api\/spill\/([^/]+)\/(sp_[A-Za-z0-9_]+)$/);
+  if (spillMatch && request.method === 'GET') {
+    const run = runs.get(decodeURIComponent(spillMatch[1]));
+    const content = SPILL_FIXTURES.get(spillMatch[2]);
+    if (!run || content == null) {
+      sendError(request, response, 404, 'not_found', '测试归档不存在。');
+      return;
+    }
+    const bytes = Buffer.from(content, 'utf8');
+    const offset = Number(url.searchParams.get('offset') || 0);
+    const limit = Math.min(16 * 1024, Number(url.searchParams.get('limit') || 16 * 1024));
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1) {
+      sendError(request, response, 400, 'invalid_request', '归档分页参数无效。');
+      return;
+    }
+    const end = Math.min(bytes.length, offset + limit);
+    sendJson(request, response, 200, {
+      id: spillMatch[2], offset, next_offset: end, total_bytes: bytes.length,
+      eof: end >= bytes.length, text: bytes.subarray(offset, end).toString('utf8'),
+    });
     return;
   }
   const capabilityMatch = url.pathname.match(/^\/api\/capabilities\/([^/]+)$/);

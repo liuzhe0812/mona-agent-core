@@ -205,14 +205,13 @@ try {
   await waitPage("!document.querySelector('#search-dialog').open && document.querySelector('#search-button').getAttribute('aria-expanded')==='false'", 'search dialog closed by Escape');
   check('Escape closes the search dialog and marks the brand button collapsed', true);
 
-  const composerRestingBorder = await evaluate("getComputedStyle(document.querySelector('.composer')).borderColor");
   await click('#prompt');
-  check('a focused composer uses the shared visible focus indicator without outlining the inner textarea', await evaluate(`(() => {
+  check('the composer owns textarea focus without adding duplicate focus chrome', await evaluate(`(() => {
     const composer = getComputedStyle(document.querySelector('.composer'));
     const field = getComputedStyle(document.querySelector('#prompt'));
-    return composer.outlineStyle === 'none' && composer.boxShadow !== 'none'
-      && field.outlineStyle === 'none' && field.boxShadow === 'none'
-      && composer.borderColor !== ${JSON.stringify(composerRestingBorder)};
+    return document.activeElement===document.querySelector('#prompt')
+      && composer.outlineStyle==='none' && composer.boxShadow==='none'
+      && field.outlineStyle==='none' && field.boxShadow==='none';
   })()`));
   await screenshot('composer-focus');
 

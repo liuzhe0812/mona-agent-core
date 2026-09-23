@@ -110,7 +110,9 @@ pub struct InputTokenEstimate {
 pub trait ModelCaller: Send + Sync {
     /// Reuse a primary-call usage anchor only for the same effective model/options/tools
     /// and an unchanged request prefix. Auxiliary calls must never update that anchor.
-    fn estimate_input_tokens(&self, _request: &ModelRequest) -> Option<InputTokenEstimate> { None }
+    fn estimate_input_tokens(&self, _request: &ModelRequest) -> Option<InputTokenEstimate> {
+        None
+    }
 
     async fn complete(
         &self,

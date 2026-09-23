@@ -10,12 +10,12 @@
 | `task-sidebar` | 左侧任务导航 | `index.html`、`sessions.css`、`sessions-ui.mjs` | governed | sidebar、sessions |
 | `task-search` | 品牌旁搜索 / Ctrl+K | `index.html`、`styles.css`、`sessions-ui.mjs` | governed | sidebar、sessions |
 | `new-task-home` | 新建任务 | `index.html`、`styles.css` | governed | design |
-| `chat-stream` | 提交任务后 | `run-view.mjs`、`styles.css` | governed | design、themes、renderer |
+| `chat-stream` | 提交任务后 | `run-view.mjs`、`content-renderer.mjs`、`styles.css` | governed | design、themes、renderer |
 | `conversation-rail` | 多轮聊天左侧轮次导航 | `conversation-rail.mjs`、`index.html`、`styles.css` | governed | design、renderer |
-| `execution-process` | 聊天中的执行摘要 | `run-view.mjs`、`styles.css` | governed | design、renderer |
+| `execution-process` | 聊天中的执行摘要与富工具结果 | `run-view.mjs`、`content-renderer.mjs`、`styles.css` | governed | design、renderer |
 | `composer` | 主界面底部 | `index.html`、`styles.css`、`app.mjs` | governed | design、sidebar、themes |
 | `model-picker` | Composer 模型选择 | `index.html`、`styles.css`、`app.mjs` | governed | design、model tests |
-| `connection-dialog` | 顶栏连接状态 | `index.html`、`styles.css`、`app.mjs` | governed | design、dev-web tests |
+| `connection-dialog` | Runtime 连接设置 | `index.html`、`styles.css`、`app.mjs` | governed | design、dev-web tests |
 | `settings-shell` | 侧栏设置 | `index.html`、`design-system.css`、`app.mjs` | governed | design、themes |
 | `settings-components` | 设置 → Agent 组件 | `index.html`、`styles.css`、`capabilities.mjs` | governed | design、capability tests |
 | `settings-tools` | 设置 → Agent 工具 | `index.html`、`styles.css`、`capabilities.mjs` | governed | design、capability tests |

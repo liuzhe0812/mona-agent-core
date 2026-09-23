@@ -40,12 +40,61 @@ impl ItemState {
     }
 }
 
+fn ui_artifact(value: &crate::ArtifactRef) -> Option<crate::ArtifactRef> {
+    let (scheme, opaque) = value.uri.split_once(':')?;
+    if scheme.is_empty()
+        || scheme.len() > 32
+        || !scheme
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'.' | b'-'))
+        || opaque.is_empty()
+        || opaque.len() > 128
+        || !opaque
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+    {
+        return None;
+    }
+    Some(value.clone())
+}
+
 /// Intentionally distinct from the model's rich ToolResult. Keeps UI protocol v2.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UiContentBlock {
+    Text {
+        text: String,
+    },
+    Image {
+        media_type: String,
+        source: UiImageSource,
+    },
+    Resource {
+        media_type: String,
+        name: Option<String>,
+        bytes: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference: Option<crate::ArtifactRef>,
+    },
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UiImageSource {
+    Base64 { data: String },
+    Redacted,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UiToolResult {
     pub call_id: String,
     pub status: ToolStatus,
+    /// Bounded text projection used by compact previews and plain-text tools.
     pub content: String,
+    /// Safe rich projection. Remote image URLs and path-bearing resource locators are never copied to UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<Vec<UiContentBlock>>,
+    #[serde(default)]
+    pub redacted: bool,
     pub truncated: bool,
     pub original_bytes: usize,
     pub artifact: Option<crate::ArtifactRef>,
@@ -53,16 +102,63 @@ pub struct UiToolResult {
 impl UiToolResult {
     pub fn from_result(result: &ToolResult) -> Self {
         let preview = result.content.preview();
+        let (blocks, mut redacted) = match &result.content {
+            crate::Content::Blocks(blocks) if result.content.byte_len() <= UI_TEXT_BYTES => {
+                let mut redacted = false;
+                let blocks = blocks
+                    .iter()
+                    .map(|block| match block {
+                        crate::ContentBlock::Text { text } => {
+                            UiContentBlock::Text { text: text.clone() }
+                        }
+                        crate::ContentBlock::Image { media_type, source } => {
+                            UiContentBlock::Image {
+                                media_type: media_type.clone(),
+                                source: match source {
+                                    crate::ImageSource::Base64 { data } => {
+                                        UiImageSource::Base64 { data: data.clone() }
+                                    }
+                                    crate::ImageSource::Url { .. } => {
+                                        redacted = true;
+                                        UiImageSource::Redacted
+                                    }
+                                },
+                            }
+                        }
+                        crate::ContentBlock::Resource {
+                            reference,
+                            media_type,
+                            name,
+                        } => {
+                            let safe_reference = ui_artifact(reference);
+                            redacted |= safe_reference.is_none();
+                            UiContentBlock::Resource {
+                                media_type: media_type.clone(),
+                                name: name.clone(),
+                                bytes: reference.bytes,
+                                reference: safe_reference,
+                            }
+                        }
+                    })
+                    .collect();
+                (Some(blocks), redacted)
+            }
+            crate::Content::Blocks(_) => (None, true),
+            crate::Content::Text(_) => (None, false),
+        };
+        let artifact = result.artifact.as_ref().and_then(ui_artifact);
+        redacted |= result.artifact.is_some() && artifact.is_none();
         Self {
             call_id: result.call_id.clone(),
             status: result.status,
             content: clip_utf8(&preview, UI_TEXT_BYTES).to_owned(),
             truncated: result.truncated
                 || preview.len() > UI_TEXT_BYTES
-                || result.content.has_media()
-                || result.structured.is_some(),
+                || (result.content.has_media() && (blocks.is_none() || redacted)),
+            blocks,
+            redacted,
             original_bytes: result.original_bytes,
-            artifact: result.artifact.clone().filter(|a| a.uri.len() <= 4096),
+            artifact,
         }
     }
 }

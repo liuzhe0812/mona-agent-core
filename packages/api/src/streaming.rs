@@ -51,14 +51,18 @@ impl RunHandle {
         struct CancelOnDrop(Option<Arc<dyn RunSession>>);
         impl Drop for CancelOnDrop {
             fn drop(&mut self) {
-                if let Some(session) = &self.0 { session.cancel(); }
+                if let Some(session) = &self.0 {
+                    session.cancel();
+                }
             }
         }
         let guard = CancelOnDrop(Some(self.session.clone()));
         async move {
             let mut guard = guard;
             let result = self.session.wait().await;
-            if result.is_ok() { guard.0.take(); }
+            if result.is_ok() {
+                guard.0.take();
+            }
             drop(guard);
             result
         }

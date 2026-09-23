@@ -11,7 +11,7 @@ const OWNERSHIP_TEXT_EXTENSIONS = new Set(['.css', '.html', '.js', '.json', '.md
 const LEGACY_EXTERNAL_NAME = ['cin', 'dy'].join('');
 const RUNTIME_JS = [
   'apps/web/app.mjs', 'apps/web/appearance.mjs', 'apps/web/theme.mjs',
-  'apps/web/run-view.mjs', 'apps/web/sessions-ui.mjs', 'apps/web/tooltip.mjs',
+  'apps/web/run-view.mjs', 'apps/web/content-renderer.mjs', 'apps/web/sessions-ui.mjs', 'apps/web/tooltip.mjs',
   'apps/web/conversation-rail.mjs',
 ];
 const REQUIRED_DECLARATIONS = Object.freeze({

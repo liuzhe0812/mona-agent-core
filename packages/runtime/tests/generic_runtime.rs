@@ -163,9 +163,19 @@ async fn image_input_and_rich_tool_result_survive_the_model_boundary() {
         assert_eq!(requests[0].messages[0], Message::user(content.clone()));
         assert!(matches!(requests[1].messages.last(), Some(Message::Tool { result }) if result.content.has_media()));
     }
-    let ui = serde_json::to_string(&handle.snapshot()).unwrap();
-    assert!(!ui.contains("AQ=="));
-    assert!(!ui.contains("private_object_count")); // Final text contains words, not the structured key.
+    let snapshot = handle.snapshot();
+    let displayed = snapshot.items.iter().find_map(|item| match &item.content {
+        ItemContent::ToolCall { result: Some(result), .. } if result.call_id == "a" => Some(result),
+        _ => None,
+    }).expect("completed tool has its authoritative UI projection");
+    // Current UI supports bounded inline images, not arbitrary structured/private payloads.
+    assert!(!displayed.redacted);
+    assert!(matches!(displayed.blocks.as_deref(), Some([
+        UiContentBlock::Text { text },
+        UiContentBlock::Image { media_type, source: UiImageSource::Base64 { data } },
+    ]) if text == "look" && media_type == "image/png" && data == "AQ=="));
+    let ui = serde_json::to_string(&snapshot).unwrap();
+    assert!(!ui.contains("private_object_count")); // Structured data stays model-only.
     host.shutdown().await.unwrap();
 }
 

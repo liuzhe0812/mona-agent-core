@@ -119,7 +119,10 @@ impl TaskControl {
     pub fn check_model_call_available(&self) -> Result<()> {
         self.check()?;
         if self.0.calls.load(Ordering::SeqCst) >= self.0.limits.max_model_calls {
-            return Err(AgentError::new(ErrorCode::Limit, "task model-call limit reached"));
+            return Err(AgentError::new(
+                ErrorCode::Limit,
+                "task model-call limit reached",
+            ));
         }
         Ok(())
     }
