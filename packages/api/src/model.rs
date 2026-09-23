@@ -82,6 +82,11 @@ pub type ModelStream = Pin<Box<dyn Stream<Item = Result<ModelEvent>> + Send>>;
 /// Raw adapter. Application plugins should use RunContext.model, not this interface.
 #[async_trait]
 pub trait Model: Send + Sync {
+    /// Pure, bounded replay validation before context transforms or network calls.
+    /// Does not test credentials/window size or modify history. Adapters own protocol rules.
+    fn validate_history(&self, _messages: &[Message], _options: &ModelOptions) -> Result<()> {
+        Ok(())
+    }
     /// Optional capacity for the effective model selected by these options.
     fn context_window_tokens(&self, _options: &ModelOptions) -> Option<u64> {
         None

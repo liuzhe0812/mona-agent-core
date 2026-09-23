@@ -18,6 +18,8 @@ impl From<AgentError> for ApplicationError {
     fn from(error: AgentError) -> Self {
         // Do not expose arbitrary provider/plugin error strings through either bridge.
         let (code, message) = match error.code {
+            ErrorCode::ModelHistoryIncompatible => (ApplicationErrorCode::InvalidRequest,
+                "当前会话包含原模型专属历史，不能直接使用所选模型。请新建会话；原会话未被转换，也不会自动重新执行。"),
             ErrorCode::Limit => (ApplicationErrorCode::Capacity, "runtime limit reached"),
             ErrorCode::Closed | ErrorCode::Cancelled => (ApplicationErrorCode::Closed, "run is no longer accepting this operation"),
             ErrorCode::Deadline => (ApplicationErrorCode::Closed, "operation deadline reached"),

@@ -32,9 +32,9 @@ impl Model for ModelProbe {
             ));
         }
         let text = if summary {
-            "old requirements preserved"
+            serde_json::to_string(&compaction::TaskSummary { goal: "old requirements preserved".into(), ..Default::default() }).unwrap()
         } else {
-            "finished"
+            "finished".into()
         };
         Ok(Box::pin(futures_util::stream::iter(vec![
             Ok(ModelEvent::Text(text.into())),
@@ -139,13 +139,13 @@ async fn confirmed_context_overflow_forces_one_smaller_retry() {
 
 #[tokio::test]
 async fn summary_calls_also_fit_the_known_model_window() {
-    let model = Arc::new(ModelProbe { capacity: Some(600), ..Default::default() });
+    let model = Arc::new(ModelProbe { capacity: Some(900), ..Default::default() });
     let mut host = HostBuilder::new().model(model.clone())
         .plugin(Arc::new(CompactionPlugin::default())).build().await.unwrap();
     let mut request = RunRequest::new("unused");
     request.limits.max_context_bytes = 64 * 1024;
     request.limits.max_output_tokens = 100;
-    request.messages = (0..4).flat_map(|i| [
+    request.messages = (0..6).flat_map(|i| [
         Message::user(format!("old-{i}-{}", "x".repeat(350))),
         assistant("prior result"),
     ]).collect();

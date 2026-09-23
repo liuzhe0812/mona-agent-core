@@ -33,6 +33,7 @@ fn fingerprint(messages: &[Message]) -> Result<String> {
 }
 impl CompactionState {
     pub(crate) fn capture(groups: &[Group], selected: &[usize], summary: &str) -> Result<Self> {
+        crate::TaskSummary::parse(summary)?;
         let mut offset = 0;
         let mut ranges = Vec::new();
         for (index, group) in groups.iter().enumerate() {
@@ -56,7 +57,7 @@ impl CompactionState {
             ));
         }
         Ok(Self {
-            version: 1,
+            version: 2,
             source_messages: offset,
             ranges,
             summary: summary.into(),
@@ -65,9 +66,9 @@ impl CompactionState {
     /// Apply only to the corresponding system-free working transcript and a new settled tail.
     /// Ranges, hashes and whole tool groups are checked; this never rewrites the host archive.
     pub fn project(&self, messages: &[Message]) -> Result<Vec<Message>> {
-        if self.version != 1
-            || self.summary.trim().is_empty()
-            || self.summary.len() > 4096
+        if self.version != 2
+            || crate::TaskSummary::parse(&self.summary).is_err()
+            || self.summary.len() > crate::MAX_SUMMARY_BYTES
             || self.ranges.is_empty()
             || self.ranges.len() > 16384
             || self.source_messages > messages.len()

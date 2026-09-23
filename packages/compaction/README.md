@@ -9,7 +9,7 @@ The default policy starts at 80% of the conservatively sized complete request
 byte budget and targets 60%. When the effective model declares a context window,
 the same thresholds also apply to a conservative token estimate after reserving
 the configured output budget; the stricter byte/token target wins. System messages, the latest user request, media,
-and unsupported resource references remain verbatim. Old tool rounds after
+unsupported resource references, and assistant/tool groups containing private replay data remain verbatim. Old tool rounds after
 that user request can be compacted. Two recent groups are preferred; pressure
 may reduce the tail to one whole group. If this mandatory tail exceeds the
 60% target, a successful projection must still fall below 80% and be smaller
@@ -46,7 +46,7 @@ Auxiliary usage remains in task accounting and audit, but is not reused as the
 main conversation's input-size estimate. The authoritative transcript is never
 rewritten by this recovery.
 
-API 7 pinned context sources and the conservative tool envelope are included before
+Pinned context sources and the actual selected tool envelope are included before
 pressure is checked; sources never become the latest user-turn anchor. A matching
 primary-request usage anchor may price the unchanged prefix, with heuristic pricing
 for new tail content. Unknown/mismatched anchors use byte estimation; auxiliary
@@ -60,5 +60,29 @@ settled tail messages; altered or invalid ranges fail explicitly. It does not wr
 files or replace the host's full conversation archive. The formal Server atomically
 stores and restores this state across Runs/restarts; an embedder may omit persistence.
 See [context management](../../docs/CONTEXT-MANAGEMENT.zh-CN.md).
+
+## Structured task handoff
+
+The model returns `TaskSummary`: a goal string and string arrays for constraints,
+corrections, decisions, completed actions, pending work and exact references. Every field
+is required. Instructions distinguish later user corrections, confirmed tool results,
+failed/unknown outcomes and plans; inputs are reference data under a separate system
+instruction, not executable commands. The previous handoff participates in each update.
+
+`CompactionConfig.max_summary_bytes` defaults to 16 KiB (256 bytes–64 KiB configurable).
+The actual escaped-JSON budget also subtracts the protected tail, sources and model
+output reserve. A malformed, incomplete, oversized or non-shrinking handoff is rejected;
+there is no silent text clipping, repair model or fallback free-text summary. Failed or
+cancelled updates do not publish a replacement; capacity exhaustion never evicts another
+active Run's handoff. Structured prompts have nonzero overhead: an indivisible group
+that cannot fit a summary request fails explicitly, even if it once fit a primary request.
+
+`CompactionState` now accepts only format 2 with validated handoff content. No old-state
+conversion is provided. Private reasoning/signature groups are protected, not summarized
+away to bypass model-history checks; enough protected history can still exhaust a window.
+Checksums prove source coverage, not semantic correctness. Deterministic tests prove the
+pipeline; actual retention quality must also be evaluated with the deployment model.
+See `tests/handoff.rs` and `sessions/tests/long_handoff.rs` for failure and repeated-reopen
+coverage.
 
 Regression coverage includes `tests/recovery.rs`; run `cargo test -p compaction`.

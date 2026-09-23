@@ -4,7 +4,7 @@
 
 没有新增万能 `context` 包或第二套 Agent 循环。`api` 定义小型上下文契约，Runtime 控制收集、压缩、请求、校验与有限恢复的时序；`models/providers` 提供实际模型窗口；`compaction` 拥有摘要算法与可序列化状态；`sessions` 扩展保存完整历史、工作集并校验归档归属；`instructions` 扩展发现和刷新规则；Server 只提供装配、配置及产品授权。Skills、Memory 仍是各自独立的上下文来源。
 
-当前 Rust API 为 7、HTTP/Tauri Stream 为 2、RunCheckpoint 为 1。会话仅支持当前格式 2，旧格式读取与迁移已删除。详见[会话扩展](../packages/sessions/README.md)和[Web 本地会话](LOCAL-SESSIONS.zh-CN.md)。
+当前 Rust API 为 9、HTTP/Tauri Stream 为 2、RunCheckpoint 为 1。会话仅支持当前格式 2，旧格式读取与迁移已删除。详见[会话扩展](../packages/sessions/README.md)和[Web 本地会话](LOCAL-SESSIONS.zh-CN.md)。
 
 ## 1. 模型窗口与计量
 
@@ -37,6 +37,14 @@
 这允许完整历史超过默认 4 MiB 接纳上限时，仍从较小的已确认工作集续聊；没有放大或取消 Runtime 的保护上限。会话文件仍有 32 MiB 总上限、512 轮限制，检查点仍有独立上限。关闭压缩时使用完整历史，过大的历史会明确拒绝。没有可验证压缩状态且工作输入本身超过保护上限时，不会静默裁切原文或在网关外调用模型。
 
 进程重启只恢复已确认记录和工作集，不自动重跑模型或工具。中断工具沿用 Pending→Skipped、已确认 intent 但结果未知→Unknown、已确认结果→原结果的规则。未确认的流式 token 不被伪造成完整回答。
+
+### 结构化任务摘要
+
+摘要包含 goal、constraints、corrections、decisions、completed、pending、references。模型合并旧交接记录和新增事实，保留用户禁令、纠正、确定动作、未知副作用及待办；计划或工具 intent 不能改写成完成。格式、大小和覆盖范围可校验，但语义准确性仍需部署模型评测。
+
+默认摘要上限 16 KiB，实际可用空间还受本轮窗口、来源、近期消息和输出预留约束；不能把 16 KiB 当每轮固定分配。缺字段、格式错误、截断、超预算和无缩小进展均明确失败，不裁切 JSON、不另开修复模型。取消/失败不发布错误状态，也不淘汰其他活动 Run 的摘要。原子保存和原始档案保持原语义。
+
+当前 CompactionState 仅接受格式 2 的有效 TaskSummary，不提供旧摘要迁移。带私有 reasoning/signature 的完整消息或工具组不参加摘要，不能用压缩绕过模型切换检查；大量受保护私有历史仍可能明确超限。整体不可分组放不进摘要请求时也会失败，不通过拆散工具调用/结果解决。
 
 ## 4. 同会话历史归档
 

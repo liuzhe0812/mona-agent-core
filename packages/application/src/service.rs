@@ -136,6 +136,10 @@ impl AgentApplication {
         state.runs.get(id).cloned().ok_or_else(|| ApplicationError::new(ApplicationErrorCode::NotFound, "run is absent or expired"))
     }
     #[cfg(feature = "sessions")]
+    pub(crate) fn validate_session_history(&self, messages: &[Message]) -> api::Result<()> {
+        self.inner.runtime.validate_history(messages, &self.inner.config.model_options)
+    }
+    #[cfg(feature = "sessions")]
     pub(crate) fn session_admission_bytes(&self) -> ApplicationResult<usize> {
         let limits = &self.inner.config.run_limits;
         let mut bytes = limits.max_initial_history_bytes.min(limits.max_history_bytes);

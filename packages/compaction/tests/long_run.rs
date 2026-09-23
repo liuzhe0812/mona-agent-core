@@ -23,9 +23,9 @@ impl Model for LoopModel {
             self.summaries.fetch_add(1, Ordering::SeqCst);
             vec![
                 ModelEvent::Text(if self.bad_summary {
-                    "S".repeat(2800)
+                    serde_json::to_string(&compaction::TaskSummary {goal:"S".repeat(2800),..Default::default()}).unwrap()
                 } else {
-                    "Earlier tool work completed; keep going.".into()
+                    serde_json::to_string(&compaction::TaskSummary { goal: "Earlier tool work completed; keep going.".into(), ..Default::default() }).unwrap()
                 }),
                 ModelEvent::Finish(FinishReason::Stop),
                 ModelEvent::End,

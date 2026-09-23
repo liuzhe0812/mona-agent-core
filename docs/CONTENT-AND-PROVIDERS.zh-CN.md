@@ -55,19 +55,19 @@ provider_options 是带命名空间的完整私有选项对象。默认 Chat 适
 
 ProviderData = namespace + JSON value。它可以附着到完整Assistant消息或某个ToolCall；ModelEvent::ProviderData携带完整替换快照，不是字符串/JSON增量补丁。数组顺序、JSON值和签名字符串保留；Core不解释、总结或改写其含义。
 
-当前Chat适配器需要宿主配置消息/工具级回传字段白名单。它收集声明为“完整值”的字段；碎片签名、特殊内容块等需要专门适配，不能简单把片段当完整值。传统reasoning_content沿用文本聚合路径；与新载荷冲突时明确失败。
+当前 Chat 适配器需要宿主配置消息/工具级回传字段白名单。它收集声明为完整值的字段；碎片签名、特殊内容块等需专门适配，不能把片段当完整值。当前 ProviderData.value 是 `{route, fields}`：route 绑定实际模型/端点/命名空间/私有配置，fields 保留白名单字段。reasoning_content 只使用文本聚合载体，结束时附小型来源信封，不在 fields 里重复保存推理文本。
 
-发送时要求命名空间一致、字段受支持，并拒绝覆盖role、content、tool_calls、id、function、arguments等控制字段。未知/跨Provider的数据明确失败，不静默丢弃。
+历史预检要求命名空间和路由指纹一致、字段受支持，并拒绝覆盖 role/content/tool_calls/id/function/arguments 等控制字段。无来源推理或外来私有数据返回 ModelHistoryIncompatible，不转换、不静默丢弃。发送时只还原 fields 和独立推理文本，route 不进入供应商请求。指纹不含 API Key 或运行/设置 revision，同一路由重启和换密钥仍可用。
 
 这是JSON语义与字段值保真，不是原始HTTP字节保真：对象键排序/转义可能规范化；若厂商要求原始签名字节，应由专用适配器将其保存为不透明字符串并按该协议恢复。不同模型之间的回传兼容性也由适配器/宿主负责，不是一个同名字段就保证兼容。
 
-ContextTransform裁剪历史时应按完整消息/工具配对处理，不应修改带签名数据的内部正文再伪称原始签名有效。
+ContextTransform 应按完整消息/工具配对处理，不得修改签名正文后伪称原签名仍有效。默认 Compaction 保护带私有数据的完整组，不用摘要隐藏来源。实际启动在任何变换之前校验原工作历史，详细行为见[模型切换](MODEL-MANAGEMENT.zh-CN.md#长会话中切换模型)。
 
 ## 7. UI和安全边界
 
 RunReport、RequestAudit、RunCheckpoint供可信Rust调用者或存储端使用，可能包含隐私数据，不能直接放进公共bridge。
 
-UI采用独立 UiToolResult：文本预览、状态、截断标志及已有可公开附件定位符。内嵌图片、Resource路径、structured数据和ProviderData不会自动发往UI；富内容遗漏明确标记truncated。开发者需要公开图片/业务卡片时，由应用发布受授权资源或工具通过已有set_detail生成经过审查的展示信息。
+UI 采用独立 UiToolResult，提供有界文本及安全富内容投影；私有推理、ProviderData、任意 structured 和路径凭据不直接回传。当前内嵌图片和受限引用规则以 [API 文档](../packages/api/README.md) 为准。显式 set_detail 只提供经过宿主审查的展示信息，不承担执行或回传协议。
 
 这不是文本脱敏器。普通文本、工具参数、日志及显式artifact仍可能敏感，应用必须继续做权限、脱敏、URL校验与转义。
 

@@ -28,9 +28,9 @@ impl Model for Fixture {
         Ok(Box::pin(futures_util::stream::iter(vec![
             Ok(ModelEvent::Text(
                 if summary {
-                    "retained decisions"
+                    serde_json::to_string(&compaction::TaskSummary { goal: "retained decisions".into(), ..Default::default() }).unwrap()
                 } else {
-                    "done"
+                    "done".into()
                 }
                 .into(),
             )),
@@ -91,10 +91,8 @@ async fn real_compaction_uses_selected_schemas_for_known_windows_and_byte_only_m
             run.limits.max_context_bytes = 2048;
             run.limits.max_output_tokens = 64;
             if long_history {
-                run.messages
-                    .insert(0, Message::user("old context ".repeat(110)));
-                run.messages
-                    .insert(1, Message::user("old decisions ".repeat(40)));
+                run.messages.splice(0..0, [Message::user("old context ".repeat(55)),
+                    Message::user("old context ".repeat(55)), Message::user("old decisions ".repeat(40))]);
             }
             let original = run.messages.clone();
             let report = host.engine().execute(run).await.unwrap();

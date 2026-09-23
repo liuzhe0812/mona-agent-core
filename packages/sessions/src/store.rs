@@ -536,6 +536,15 @@ impl Store {
         prompt: &str,
         admission_bytes: usize,
     ) -> Result<Prepared> {
+        self.prepare_checked(id, revision, key, prompt, admission_bytes, |_| Ok(()))
+    }
+    /// Like prepare, with a pure host check under the same revision/admission lock.
+    /// The callback sees the exact next working history; failure leaves the file unchanged.
+    /// It must not do I/O or re-enter this Store. Duplicate requests bypass the callback.
+    pub fn prepare_checked(
+        &self, id: &str, revision: u64, key: &str, prompt: &str, admission_bytes: usize,
+        check: impl FnOnce(&[Message]) -> Result<()>,
+    ) -> Result<Prepared> {
         validate_id(key)?;
         if prompt.trim().is_empty() || prompt.len() > 64 * 1024 {
             return Err(error(Code::InvalidRequest, "消息不能为空或超过 64 KiB。"));
@@ -554,6 +563,7 @@ impl Store {
         }
         let canonical_len = doc.history()?.len();
         let history = doc.begin_workset(self.compaction_enabled(), prompt, admission_bytes)?;
+        check(&history)?;
         if doc.body.turns.is_empty() && doc.header.title == "新会话" {
             doc.header.title = prompt
                 .chars()

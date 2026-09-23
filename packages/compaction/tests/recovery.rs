@@ -17,7 +17,8 @@ impl Model for RecoveryModel {
         let summary = request.messages[0].text().starts_with("Summarize the earlier");
         let text = if summary {
             let index = self.summaries.fetch_add(1, Ordering::SeqCst);
-            if index == 0 || self.no_progress { "S".repeat(600) } else { "preserved requirements".into() }
+            let goal = if index == 0 || self.no_progress { "S".repeat(400) } else { "preserved requirements".into() };
+            serde_json::to_string(&compaction::TaskSummary { goal, ..Default::default() }).unwrap()
         } else {
             self.primary_bytes.lock().unwrap().push(serde_json::to_vec(&request).unwrap().len());
             if self.primary.fetch_add(1, Ordering::SeqCst) == 0 || self.repeated_overflow {

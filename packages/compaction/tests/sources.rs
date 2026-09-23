@@ -44,9 +44,9 @@ impl Model for CapturingModel {
         let events = vec![
             ModelEvent::Text(
                 if summary {
-                    "preserved decisions"
+                    serde_json::to_string(&compaction::TaskSummary { goal: "preserved decisions".into(), ..Default::default() }).unwrap()
                 } else {
-                    "done"
+                    "done".into()
                 }
                 .into(),
             ),

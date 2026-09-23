@@ -4,6 +4,7 @@ use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use reqwest::{Client, Url};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::{collections::{VecDeque, BTreeSet}, pin::Pin, time::Duration};
 
 #[derive(Clone, Copy)]
@@ -83,6 +84,7 @@ impl ChatModel {
         Ok(Self { client, endpoint, config })
     }
     fn body(&self, request: &ModelRequest) -> Result<Value> {
+        self.validate_history(&request.messages, &request.options)?;
         request.options.validate()?;
         let model = request.options.model.as_deref().unwrap_or(&self.config.model);
         if model != self.config.model && !self.config.allowed_models.contains(model) {
@@ -105,13 +107,13 @@ impl ChatModel {
                                 "name":call.name,
                                 "arguments":serde_json::to_string(&call.arguments).map_err(|_| AgentError::new(ErrorCode::ModelProtocol, "cannot serialize tool arguments"))?
                             }});
-                            self.replay(&mut wire, call.provider_data.as_ref(), &self.config.tool_replay_fields)?;
+                            self.replay(&mut wire, call.provider_data.as_ref(), &self.config.tool_replay_fields, &request.options)?;
                             Ok(wire)
                         }).collect::<Result<Vec<_>>>()?;
                         message["tool_calls"] = json!(calls);
                     }
                     if let Some(reasoning) = reasoning_content { message["reasoning_content"] = json!(reasoning); }
-                    self.replay(&mut message, provider_data.as_ref(), &self.config.message_replay_fields)?;
+                    self.replay(&mut message, provider_data.as_ref(), &self.config.message_replay_fields, &request.options)?;
                     message
                 }
                 Message::Tool { result } => {
@@ -195,16 +197,29 @@ impl ChatModel {
                 "resource references are not file bytes; provide a resolving adapter/transform")),
         }
     }
-    fn replay(&self, target: &mut Value, data: Option<&ProviderData>, fields: &BTreeSet<String>) -> Result<()> {
+    fn replay_route(&self, options: &ModelOptions) -> Result<String> {
+        let model = options.model.as_deref().unwrap_or(&self.config.model);
+        if model != self.config.model && !self.config.allowed_models.contains(model) {
+            return Err(AgentError::new(ErrorCode::Configuration, "requested model is not in the adapter allowlist"));
+        }
+        // Stable across restart and credential rotation, but not a different model/endpoint/profile.
+        // Neither credentials nor the transient ManagedRuntime selector are serialized here.
+        let route = serde_json::to_vec(&(&self.config.protocol_namespace, self.endpoint.as_str(), model, &self.config.extra_body, &options.provider_options))
+            .map_err(|_| incompatible_history())?;
+        Ok(format!("{:x}", Sha256::digest(route)))
+    }
+    fn replay(&self, target: &mut Value, data: Option<&ProviderData>, fields: &BTreeSet<String>, options: &ModelOptions) -> Result<()> {
         let Some(data) = data else { return Ok(()); };
         data.validate()?;
-        if data.namespace != self.config.protocol_namespace {
-            return Err(AgentError::new(ErrorCode::Unsupported, "foreign replay data must not be silently discarded or sent to a different adapter"));
+        let envelope = data.value.as_object().ok_or_else(incompatible_history)?;
+        if data.namespace != self.config.protocol_namespace || envelope.len() != 2
+            || envelope.get("route").and_then(Value::as_str) != Some(self.replay_route(options)?.as_str()) {
+            return Err(incompatible_history());
         }
-        let object = data.value.as_object().ok_or_else(|| AgentError::new(ErrorCode::Unsupported, "this adapter expects object replay data"))?;
+        let object = envelope.get("fields").and_then(Value::as_object).ok_or_else(incompatible_history)?;
         for (key, value) in object {
-            if RESERVED_REPLAY_FIELDS.contains(&key.as_str()) || !fields.contains(key) {
-                return Err(AgentError::new(ErrorCode::Unsupported, "provider replay field is reserved or not supported by this adapter"));
+            if key == "reasoning_content" || RESERVED_REPLAY_FIELDS.contains(&key.as_str()) || !fields.contains(key) {
+                return Err(incompatible_history());
             }
             if target.get(key).is_some_and(|old| old != value) {
                 return Err(AgentError::new(ErrorCode::ModelProtocol, "conflicting legacy and opaque replay fields"));
@@ -214,6 +229,11 @@ impl ChatModel {
         Ok(())
     }
 
+}
+
+fn incompatible_history() -> AgentError {
+    AgentError::new(ErrorCode::ModelHistoryIncompatible,
+        "history contains model-specific replay data incompatible with the selected model or endpoint; start a new session")
 }
 
 fn retry_after_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
@@ -343,6 +363,26 @@ fn classify_provider_error(error: &Value) -> AgentError {
 
 #[async_trait]
 impl Model for ChatModel {
+    fn validate_history(&self, messages: &[Message], options: &ModelOptions) -> Result<()> {
+        options.validate()?;
+        self.replay_route(options)?;
+        for message in messages {
+            if let Message::Assistant { reasoning_content, provider_data, tool_calls, .. } = message {
+                let mut target = json!({});
+                self.replay(&mut target, provider_data.as_ref(), &self.config.message_replay_fields, options)?;
+                // Reasoning has a single content carrier; the envelope binds its origin,
+                // without duplicating every reasoning token in opaque fields.
+                if reasoning_content.is_some() && (provider_data.is_none()
+                    || !self.config.message_replay_fields.contains("reasoning_content")) {
+                    return Err(incompatible_history());
+                }
+                for call in tool_calls {
+                    self.replay(&mut json!({}), call.provider_data.as_ref(), &self.config.tool_replay_fields, options)?;
+                }
+            }
+        }
+        Ok(())
+    }
     fn context_window_tokens(&self, options: &ModelOptions) -> Option<u64> {
         match options.model.as_deref() {
             None => self.config.context_window_tokens,
@@ -352,6 +392,7 @@ impl Model for ChatModel {
     }
 
     async fn stream(&self, request: ModelRequest, cancel: CancellationToken) -> Result<ModelStream> {
+        let route = self.replay_route(&request.options)?;
         let body = self.body(&request)?;
         let mut request = self.client.post(self.endpoint.clone()).json(&body).header("Accept", "text/event-stream");
         if let Some(key) = &self.config.api_key { request = request.bearer_auth(key); }
@@ -370,7 +411,7 @@ impl Model for ChatModel {
         let state = WireState { body: Box::pin(response.bytes_stream()), decoder: SseDecoder::new(self.config.max_sse_event_bytes),
             pending: VecDeque::new(), failure: None, output_started: false,
             done: false, cancel, received: 0, max_wire: self.config.max_wire_bytes,
-            replay: ReplayCapture { namespace: self.config.protocol_namespace.clone(),
+            replay: ReplayCapture { namespace: self.config.protocol_namespace.clone(), route, reasoning_seen: false,
                 message_fields: self.config.message_replay_fields.clone(), tool_fields: self.config.tool_replay_fields.clone(),
                 message: Map::new(), tools: std::collections::BTreeMap::new() } };
         Ok(state.into_stream())
@@ -446,6 +487,8 @@ fn flush_tool_images(messages: &mut Vec<Value>, images: &mut Vec<Value>) {
     if !images.is_empty() { messages.push(json!({"role":"user", "content":std::mem::take(images)})); }
 }
 struct ReplayCapture {
+    route: String,
+    reasoning_seen: bool,
     namespace: String, message_fields: BTreeSet<String>, tool_fields: BTreeSet<String>,
     message: Map<String, Value>, tools: std::collections::BTreeMap<usize, Map<String, Value>>,
 }
@@ -463,8 +506,16 @@ impl ReplayCapture {
                     if key == "reasoning_content" { continue; }
                     if let Some(value) = delta.get(key) { self.message.insert(key.clone(), value.clone()); changed = true; }
                 }
+                if let Some(value) = delta.get("reasoning_content").filter(|v| !v.is_null()) {
+                    let text = value.as_str().ok_or_else(incompatible_history)?;
+                    if !self.message_fields.contains("reasoning_content") { return Err(incompatible_history()); }
+                    self.reasoning_seen |= !text.is_empty();
+                }
+                if choice.get("finish_reason").is_some_and(|v| !v.is_null()) && self.reasoning_seen {
+                    changed = true;
+                }
                 if changed { events.push(ModelEvent::ProviderData { target: ProtocolTarget::Assistant,
-                    data: ProviderData { namespace: self.namespace.clone(), value: Value::Object(self.message.clone()) } }); }
+                    data: ProviderData { namespace: self.namespace.clone(), value: json!({"route":self.route,"fields":self.message}) } }); }
                 if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
                     for call in calls {
                         let index = call["index"].as_u64().and_then(|i| usize::try_from(i).ok())
@@ -477,7 +528,7 @@ impl ReplayCapture {
                             if let Some(value) = call.get(key) { data.insert(key.clone(), value.clone()); changed = true; }
                         }
                         if changed { events.push(ModelEvent::ProviderData { target: ProtocolTarget::ToolCall { index },
-                            data: ProviderData { namespace: self.namespace.clone(), value: Value::Object(data.clone()) } }); }
+                            data: ProviderData { namespace: self.namespace.clone(), value: json!({"route":self.route,"fields":data}) } }); }
                     }
                 }
             }
@@ -541,18 +592,26 @@ fn decode_chunk(data: &str) -> Result<Vec<ModelEvent>> {
 }
 
 #[cfg(test)]
+#[path = "chat_history_tests.rs"]
+mod history_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
 
+    pub(super) fn scoped(model: &ChatModel, fields: Value) -> ProviderData {
+        ProviderData { namespace: model.config.protocol_namespace.clone(),
+            value: json!({"route":model.replay_route(&ModelOptions::default()).unwrap(),"fields":fields}) }
+    }
     fn coalesced_stream(raw: String) -> ModelStream {
         WireState {
             body: Box::pin(futures_util::stream::iter(vec![Ok(Bytes::from(raw))])),
             decoder: SseDecoder::new(64 * 1024), pending: VecDeque::new(),
             failure: None, output_started: false, done: false,
             cancel: CancellationToken::new(), received: 0, max_wire: 64 * 1024,
-            replay: ReplayCapture { namespace: "test".into(),
-                message_fields: ["signed_blocks".to_owned()].into_iter().collect(),
+            replay: ReplayCapture { namespace: "test".into(), route: "test-route".into(), reasoning_seen: false,
+                message_fields: ["signed_blocks".to_owned(), "reasoning_content".to_owned()].into_iter().collect(),
                 tool_fields: BTreeSet::new(), message: Map::new(), tools: Default::default() },
         }.into_stream()
     }
@@ -623,7 +682,7 @@ mod tests {
         let model = ChatModel::new(ChatConfig::new("https://example.invalid/chat/completions", "test")).unwrap();
         let request = ModelRequest { messages: vec![Message::Assistant { content: "".into(),
             tool_calls: vec![ToolCall::new("one", "test", json!({}))],
-            reasoning_content: Some("provider-returned-data".into()), provider_data: None }], tools: vec![], max_output_tokens: 32, options: ModelOptions::default() };
+            reasoning_content: Some("provider-returned-data".into()), provider_data: Some(scoped(&model, json!({}))) }], tools: vec![], max_output_tokens: 32, options: ModelOptions::default() };
         let body = model.body(&request).unwrap();
         assert_eq!(body["messages"][0]["reasoning_content"], "provider-returned-data");
         assert_eq!(body["messages"][0]["tool_calls"][0]["function"]["arguments"], "{}");
@@ -757,6 +816,7 @@ mod tests {
 #[cfg(test)]
 mod generic_tests {
     use super::*;
+    use super::tests::scoped;
     fn config() -> ChatConfig { ChatConfig::new("https://example.invalid/chat/completions", "base") }
     fn request(messages: Vec<Message>) -> ModelRequest {
         ModelRequest { messages, tools: vec![], max_output_tokens: 128, options: ModelOptions::default() }
@@ -860,37 +920,42 @@ mod generic_tests {
     fn replay_is_preserved_only_for_the_matching_namespace_and_fields() {
         let mut c = config(); c.message_replay_fields.insert("signed_blocks".into()); c.tool_replay_fields.insert("signature".into());
         let model = ChatModel::new(c).unwrap();
-        let data = ProviderData { namespace: "chat_completions".into(), value: json!({"signed_blocks":[{"x":1},{"x":2}]}) };
+        let data = scoped(&model, json!({"signed_blocks":[{"x":1},{"x":2}]}));
         let mut call = ToolCall::new("a", "count", json!({}));
-        call.provider_data = Some(ProviderData { namespace: "chat_completions".into(), value: json!({"signature":"signed"}) });
+        call.provider_data = Some(scoped(&model, json!({"signature":"signed"})));
         let body = model.body(&request(vec![assistant(vec![call], Some(data.clone()))])).unwrap();
-        assert_eq!(body["messages"][0]["signed_blocks"], data.value["signed_blocks"]);
+        assert_eq!(body["messages"][0]["signed_blocks"], data.value["fields"]["signed_blocks"]);
         assert_eq!(body["messages"][0]["tool_calls"][0]["signature"], "signed");
         let foreign = ProviderData { namespace: "foreign".into(), value: data.value };
-        assert_eq!(model.body(&request(vec![assistant(vec![], Some(foreign))])).unwrap_err().code, ErrorCode::Unsupported);
+        assert_eq!(model.body(&request(vec![assistant(vec![], Some(foreign))])).unwrap_err().code, ErrorCode::ModelHistoryIncompatible);
     }
     #[test]
     fn opaque_replay_cannot_rewrite_identity_or_actions() {
         let mut c = config(); c.message_replay_fields.insert("tool_calls".into());
         assert!(ChatModel::new(c).is_err());
         let model = ChatModel::new(config()).unwrap();
-        let data = ProviderData { namespace: "chat_completions".into(), value: json!({"role":"system"}) };
-        assert!(model.body(&request(vec![assistant(vec![], Some(data))])).is_err());
+        // Use a valid route envelope so this exercises reserved-field rejection,
+        // rather than stopping earlier on an obsolete/unscoped replay format.
+        let data = scoped(&model, json!({"role":"system"}));
+        assert_eq!(model.body(&request(vec![assistant(vec![], Some(data))])).unwrap_err().code, ErrorCode::ModelHistoryIncompatible);
+        let mut call = ToolCall::new("actual-call", "count", json!({}));
+        call.provider_data = Some(scoped(&model, json!({"id":"forged-call"})));
+        assert_eq!(model.body(&request(vec![assistant(vec![call], None)])).unwrap_err().code, ErrorCode::ModelHistoryIncompatible);
     }
     #[test]
     fn complete_snapshot_capture_preserves_order_and_call_association() {
-        let mut capture = ReplayCapture { namespace: "test".into(), message_fields: ["blocks".to_owned()].into_iter().collect(),
+        let mut capture = ReplayCapture { namespace: "test".into(), route: "test-route".into(), reasoning_seen: false, message_fields: ["blocks".to_owned()].into_iter().collect(),
             tool_fields: ["signature".to_owned()].into_iter().collect(), message: Map::new(), tools: std::collections::BTreeMap::new() };
         let raw = r#"{"choices":[{"delta":{"blocks":["first","second"],"tool_calls":[{"index":0,"signature":"s1"}]}}]}"#;
         let events = capture.capture(raw).unwrap();
-        assert!(matches!(&events[0], ModelEvent::ProviderData { target: ProtocolTarget::Assistant, data } if data.value["blocks"] == json!(["first","second"])));
-        assert!(matches!(&events[1], ModelEvent::ProviderData { target: ProtocolTarget::ToolCall { index: 0 }, data } if data.value["signature"] == "s1"));
+        assert!(matches!(&events[0], ModelEvent::ProviderData { target: ProtocolTarget::Assistant, data } if data.value["fields"]["blocks"] == json!(["first","second"])));
+        assert!(matches!(&events[1], ModelEvent::ProviderData { target: ProtocolTarget::ToolCall { index: 0 }, data } if data.value["fields"]["signature"] == "s1"));
         let next = capture.capture(r#"{"choices":[{"delta":{"blocks":["replacement"]}}]}"#).unwrap();
-        assert!(matches!(&next[0], ModelEvent::ProviderData { data, .. } if data.value["blocks"] == json!(["replacement"])));
+        assert!(matches!(&next[0], ModelEvent::ProviderData { data, .. } if data.value["fields"]["blocks"] == json!(["replacement"])));
     }
     #[test]
     fn replay_index_uses_the_api_tool_call_limit() {
-        let mut capture = ReplayCapture { namespace: "test".into(), message_fields: BTreeSet::new(),
+        let mut capture = ReplayCapture { namespace: "test".into(), route: "test-route".into(), reasoning_seen: false, message_fields: BTreeSet::new(),
             tool_fields: ["signature".to_owned()].into_iter().collect(), message: Map::new(), tools: std::collections::BTreeMap::new() };
         let too_large = json!({"choices":[{"delta":{"tool_calls":[{"index":MAX_TOOL_CALLS_PER_STEP,"signature":"s"}]}}]}).to_string();
         assert_eq!(capture.capture(&too_large).unwrap_err().code, ErrorCode::Limit);
@@ -898,10 +963,10 @@ mod generic_tests {
         assert!(capture.capture(&last_valid).is_ok());
     }
     #[test]
-    fn legacy_and_opaque_replay_conflict_is_not_silently_overwritten() {
+    fn conflicting_reasoning_and_scoped_replay_are_rejected() {
         let model = ChatModel::new(config()).unwrap();
         let message = Message::Assistant { content: "".into(), tool_calls: vec![], reasoning_content: Some("a".into()),
-            provider_data: Some(ProviderData { namespace: "chat_completions".into(), value: json!({"reasoning_content":"b"}) }) };
-        assert_eq!(model.body(&request(vec![message])).unwrap_err().code, ErrorCode::ModelProtocol);
+            provider_data: Some(scoped(&model, json!({"reasoning_content":"b"}))) };
+        assert_eq!(model.body(&request(vec![message])).unwrap_err().code, ErrorCode::ModelHistoryIncompatible);
     }
 }

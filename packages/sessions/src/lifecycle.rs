@@ -72,6 +72,9 @@ impl AgentExecutor for SessionRuntime {
     }
 }
 impl AgentRuntime for SessionRuntime {
+    fn validate_history(&self, messages: &[Message], options: &ModelOptions) -> Result<()> {
+        self.inner.validate_history(messages, options)
+    }
     fn start(&self, request: RunRequest) -> Result<RunHandle> {
         let binding = match (
             request.metadata.get(SESSION_KEY),

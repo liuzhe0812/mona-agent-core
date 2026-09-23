@@ -79,5 +79,10 @@ impl RunHandle {
 /// The default Engine and alternative runtimes share this contract.
 /// A final-result-only Planner remains an AgentExecutor until it defines composite stream semantics.
 pub trait AgentRuntime: AgentExecutor {
+    /// Pure admission preflight. Wrappers forward it; start must recheck its pinned model.
+    /// A preflight success is not a reservation and does not authorize any execution.
+    fn validate_history(&self, _messages: &[crate::Message], _options: &crate::ModelOptions) -> Result<()> {
+        Ok(())
+    }
     fn start(&self, request: RunRequest) -> Result<RunHandle>;
 }

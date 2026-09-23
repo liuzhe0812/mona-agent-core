@@ -7,7 +7,7 @@ struct Summarizer;
 impl ModelCaller for Summarizer {
     async fn complete(&self, _: ModelRequest, _: Option<Arc<dyn ModelSink>>) -> Result<ModelReply> {
         Ok(ModelReply {
-            content: "decision 31415".into(),
+            content: serde_json::to_string(&compaction::TaskSummary { goal: "decision 31415".into(), ..Default::default() }).unwrap(),
             tool_calls: vec![],
             reasoning_content: None,
             provider_data: None,
@@ -40,7 +40,8 @@ async fn state_roundtrips_validates_coverage_and_reuses_summary_with_new_tail() 
         allowed_tools: None,
     };
     let original = vec![
-        Message::user("earlier ".repeat(400)),
+        Message::user("earlier ".repeat(200)),
+        Message::user("earlier ".repeat(200)),
         Message::user("current"),
     ];
     let projected = compactor.transform(&ctx, original.clone()).await.unwrap();

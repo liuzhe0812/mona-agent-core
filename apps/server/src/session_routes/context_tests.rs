@@ -26,9 +26,9 @@ impl Model for ArchiveModel {
         Ok(Box::pin(futures_util::stream::iter(vec![
             Ok(ModelEvent::Text(
                 if summary {
-                    "preserved decision 31415"
+                    serde_json::to_string(&compaction::TaskSummary { goal: "preserved decision 31415".into(), ..Default::default() }).unwrap()
                 } else {
-                    "ACK"
+                    "ACK".into()
                 }
                 .into(),
             )),
@@ -172,10 +172,10 @@ async fn archive_above_core_admission_cap_still_continues_from_verified_bounded_
             > RunLimits::default().max_initial_history_bytes
     );
     let state = CompactionState {
-        version: 1,
+        version: 2,
         source_messages: history.len(),
         ranges,
-        summary: "prior tool rounds retained in archive".into(),
+        summary: serde_json::to_string(&compaction::TaskSummary { goal: "prior tool rounds retained in archive".into(), ..Default::default() }).unwrap(),
     };
     let mut cp = checkpoint(&header.id, "old", history.clone());
     cp.phase = CheckpointPhase::RunFinished;

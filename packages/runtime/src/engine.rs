@@ -207,6 +207,8 @@ impl Engine {
             id: id.clone(),
         };
         let provider = registry.services.get::<ModelProvider>(MODEL_SERVICE)?;
+        // Reject incompatible replay before any transform can call a summarizer or erase it.
+        provider.0.validate_history(&transcript, &request.model_options)?;
         let model_context_window_tokens =
             provider.0.context_window_tokens(&request.model_options);
         let gateway = Arc::new(Gateway::new(
@@ -401,6 +403,10 @@ impl AgentExecutor for Engine {
 }
 
 impl AgentRuntime for Engine {
+    fn validate_history(&self, messages: &[Message], options: &ModelOptions) -> Result<()> {
+        options.validate()?;
+        self.registry()?.services.get::<ModelProvider>(MODEL_SERVICE)?.0.validate_history(messages, options)
+    }
     fn start(&self, request: RunRequest) -> Result<RunHandle> {
         Engine::start(self, request)
     }

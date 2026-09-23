@@ -20,6 +20,8 @@ pub enum ErrorCode {
     ModelRateLimit,
     ModelServer,
     ModelContextWindow,
+    /// The selected adapter cannot safely replay this history. Never retry or strip fields.
+    ModelHistoryIncompatible,
     ModelRequest,
     ModelTransport,
     ModelProtocol,

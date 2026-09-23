@@ -9,6 +9,7 @@
 | `Store::open(base, workspace)` | 打开工作空间隔离的本地存储，持有单写者文件锁；存储路径不从环境变量推导 |
 | `create/list/get/rename/delete` | 会话管理；修改使用 revision 防止覆盖，运行中不能删除 |
 | `prepare(id, revision, request_id, prompt, admission_bytes)` | 在启动 Run 前可靠保存输入并去重；返回 `Prepared::New { history }` 或已保存的轮次；上限由宿主传入 |
+| `prepare_checked(..., check)` | 在同一 revision/接纳锁内对准确工作历史执行宿主纯检查；失败不保存新轮次，已保存的重复请求不重新检查或执行 |
 | `SessionSink(store)` | 接入现有 `CheckpointSink`，等待原子保存确认；不使用尽力而为的事件观察器 |
 | `runtime(inner, store)` | 装饰同一个 `AgentRuntime`，保持取消语义并等待失败收尾；不是新执行循环 |
 | `Document::history()` / `source_history(id)` | 读取完整事实；不把摘要当作用户原文，不恢复旧权限或系统指令 |
@@ -24,6 +25,8 @@
 ## 摘要与恢复
 
 `compaction` Cargo feature 默认关闭。需要跨轮次摘要时启用它，将同一个 `CompactionPlugin::compactor()` 传给 `Store::attach_compactor`，同时在 Host 装配该 Plugin。摘要、覆盖范围和检查点一起确认；下一轮验证工作前缀与原文指纹后重建较小工作集，原档案不改写。
+
+当前摘要是 CompactionState 格式 2 的结构化任务交接记录；只接受当前状态，不转换自由文本旧摘要。`tests/long_handoff.rs` 验证连续压缩、五轮重开存储、用户纠正、已完成工具不重跑和待办保留。它使用受控模型，不证明真实模型必然正确概括所有事实。
 
 `admission_bytes` 包含返回历史与新 prompt，不包含宿主尚未插入的系统消息；宿主应先预留系统消息，并取初始历史及累计历史限额的较小值。容量不足在保存新轮次前返回错误，旧摘要和档案保持不变。
 

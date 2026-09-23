@@ -34,7 +34,7 @@ async fn mock_model(State(probe): State<Arc<Probe>>, Json(request): Json<Value>)
     let (delta, reason) = if summary {
         probe.summaries.fetch_add(1, Ordering::SeqCst);
         (
-            json!({"content":"Earlier tool calls completed. Continue reading the saved archive from the latest cursor."}),
+            json!({"content":serde_json::to_string(&compaction::TaskSummary { goal: "Earlier tool calls completed. Continue reading the saved archive from the latest cursor.".into(), ..Default::default() }).unwrap()}),
             "stop",
         )
     } else {

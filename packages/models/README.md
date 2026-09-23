@@ -31,6 +31,18 @@ The trusted request audit contains an internal `managed:<provider>:<revision>:<s
 selector; the router replaces it with the actual model ID at the adapter boundary.
 Per-run model overrides and crash recovery are not implemented by this module.
 
+## History preflight and model switching
+
+`ManagedRuntime::validate_history` checks the current default adapter locally. It is
+not a model reservation: `start` binds the actual selected model and checks again
+before the engine starts or any context transform calls a summarizer. Router and
+session wrappers forward the same hook. Plain histories can switch; incompatible
+private replay fails with `ModelHistoryIncompatible`, without a model call or silent
+conversion. The application presents a new-session instruction; it never creates one
+or falls back to another model automatically. The current session extension runs this
+check before saving a new turn. A configuration race after that preflight can still
+produce a saved failed input, but cannot send incompatible history to the new model.
+
 ## Model context capacity
 
 `ModelEntry.context_window_tokens: Option<u64>` is a trusted per-provider/per-model

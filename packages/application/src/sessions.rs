@@ -105,9 +105,14 @@ impl SessionApplication {
         let store = self.store.clone();
         let sid = id.clone();
         let req = request.clone();
-        let prepared =
-            disk(move || store.prepare(&sid, req.revision, &req.request_id, &req.prompt, limit))
-                .await?;
+        let app = self.app.clone();
+        let prepared = disk(move || store.prepare_checked(
+            &sid, req.revision, &req.request_id, &req.prompt, limit,
+            |history| app.validate_session_history(history).map_err(|failure| {
+                let failure = ApplicationError::from(failure);
+                SessionError::new(SessionErrorCode::InvalidRequest, failure.message)
+            }),
+        )).await?;
         if let Prepared::Existing(turn, session) = prepared {
             let live = turn
                 .run_id

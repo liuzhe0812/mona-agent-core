@@ -10,7 +10,7 @@ Plugin 是组件接入 Runtime 的一种方式，不是所有组件的必需形�
 
 `Plugin` 包含三个方法：`manifest`、异步 `install`、异步 `shutdown`。
 
-Manifest 指定 id、api_version、requires、provides。requires/provides 是服务键，不是类名和文件路径。当前公共 API 协议号为 7；它与包版本 0.3.0 不是同一个值。包在 1.0 前仍可能调整 Rust 接口。
+Manifest 指定 id、api_version、requires、provides。requires/provides 是服务键，不是类名和文件路径。当前公共 API 协议号为 9；它与包版本 0.3.0 不是同一个值。包在 1.0 前仍可能调整 Rust 接口。
 
 安装流程：
 
@@ -48,6 +48,8 @@ API 7 的目录、规则、记忆等注入组件应通过 `ContextTransform::sou
 通过服务键 `agent.model` 发布 `ModelProvider(Arc<dyn Model>)`，即可不通过 HostBuilder.model 提供模型。两种配置方式不能同时声明同一个服务。
 
 运行时服务视图会隐藏原始模型适配器；辅助模型调用使用 `RunContext.model`。不要私建 HTTP 客户端绕过任务预算。
+
+`Model::validate_history` 提供纯协议预检，不进行网络或模型调用、不改写历史。`AgentRuntime` 包装器应转发该入口，实际 start 对绑定模型再检查，不能把先前预检当作配置预留。模型私有回传不兼容返回 `ModelHistoryIncompatible`；不自动重试、删除字段或新建会话。标准会话适配在持久接纳前调用，具体路由/签名规则只在 Providers/Models，不进入 Runtime。
 
 ### 自定义服务
 

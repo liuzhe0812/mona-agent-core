@@ -246,7 +246,7 @@ fn artifact_bytes_are_part_of_result_budget() {
 
 #[test]
 fn rust_api_version_and_ui_protocol_are_independent() {
-    assert_eq!(API_VERSION, 8);
+    assert_eq!(API_VERSION, 9);
     assert_eq!(STREAM_VERSION, 2);
     assert_eq!(CHECKPOINT_VERSION, 1);
 }

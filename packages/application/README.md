@@ -14,6 +14,8 @@
 
 启用 `application/sessions` 后，构造 `SessionApplication::new(store, app)`，调用 `start_turn(session_id, TurnRequest)`。Store、SessionSink 与 sessions::runtime 必须属于同一装配。适配器使用当前 ApplicationConfig 的真实初始/累计历史上限，并先预留当前系统消息成本；存储接纳失败不写入新轮次。接纳操作不因 HTTP/IPC 调用者断线而取消；相同已保存请求不会新建 Run。会话错误显式映射到现有 ApplicationError，不扩大通用 Bridge 的不可信输入面。
 
+新轮次通过 `Store::prepare_checked` 在保存前调用当前 Runtime 的纯历史检查。不兼容私有模型历史映射为明确的“请新建会话”错误，不暴露签名、推理或端点。已保存请求的重发仍直接返回原轮次，不因切换模型重新执行。实际启动按绑定模型再检查，接纳后配置变化导致的失败只记录为失败输入，不会发出不兼容请求。
+
 这一适配可被 Web、Tauri 或其他产品复用；纯 Runtime 嵌入可只使用 [sessions](../sessions/README.md)，不引入本包。Server 中只有管理路由与安全展示投影。
 
 验证：`cargo test -p application --no-default-features` 检查无会话依赖的基础入口；`cargo test -p application --features sessions` 检查当前宿主策略、系统消息预算、并发请求去重和启动调用者断开后的可靠接纳。生产依赖不包含 Runtime；测试的 Runtime dev-dependency 不构成依赖倒置。

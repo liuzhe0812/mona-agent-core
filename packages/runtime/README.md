@@ -12,6 +12,8 @@ let report = host.engine().execute(api::RunRequest::new("task")).await?;
 host.shutdown().await?;
 ```
 
+启动时先完成消息/容量校验和实际模型的 `validate_history`，再派发执行任务。模型专属历史不兼容时，尚未运行来源、摘要、模型或工具，也不预留模型调用；Runtime 不解释端点、签名或摘要内容。独立预检成功不锁定模型配置，`start` 仍重新检查。
+
 ## 历史容量与结果结算
 
 `max_history_bytes` 默认 8 MiB，限制本 Run 实际保留的规范 JSON 历史；它独立于初始接纳、单次请求和检查点上限，即使不安装任何扩展也生效。使用计数序列化器增量计量，不为测量额外分配整份 JSON，也不把摘要投影当成实际历史。

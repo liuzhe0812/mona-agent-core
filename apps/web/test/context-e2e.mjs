@@ -43,7 +43,7 @@ function userMessages(request) {
 }
 const fixture = createServer(async (req, res) => {
   try {
-    if (req.method === 'GET' && req.url === '/models') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ data: [{ id: 'context-fixture' }] })); return; }
+    if (req.method === 'GET' && req.url === '/models') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ data: [{ id: 'context-fixture' }, { id: 'context-other' }] })); return; }
     let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 4 * 1024 * 1024) throw new Error('fixture input limit'); }
     const body = JSON.parse(raw); requests.push(body);
     const summary = body.messages[0]?.content?.startsWith('Summarize the earlier');
@@ -52,7 +52,10 @@ const fixture = createServer(async (req, res) => {
     const frame = value => res.write(`data: ${JSON.stringify(value)}\n\n`);
     const text = value => frame({ choices: [{ index: 0, delta: { content: value }, finish_reason: 'stop' }] });
     const call = (name, args) => frame({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `context-call-${requests.length}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: 'tool_calls' }] });
-    if (summary) { summaries++; text('Preserved decision 31415 and completed earlier conversation.'); }
+    if (summary) { summaries++; text(JSON.stringify({goal:'Preserved decision 31415 and completed earlier conversation.',constraints:[],corrections:[],decisions:[],completed:[],pending:[],references:[]})); }
+    else if (latest.startsWith('PRIVATE_ROUTE')) {
+      frame({ choices:[{index:0,delta:{reasoning_content:'PRIVATE_PROTOCOL_REASONING',content:'PRIVATE_ROUTE_CONFIRMED'},finish_reason:'stop'}] });
+    }
     else if (latest.startsWith('ARCHIVE_CREATE') && body.messages.at(-1)?.role === 'user') {
       const command = process.platform === 'win32'
         ? "[Console]::Write('ARTIFACT_31415 ' + ('z' * 60000) + 'MIDDLE_27182' + ('y' * 60000) + 'END_16180')"
@@ -119,6 +122,13 @@ async function submit(value, count) {
   await waitFor(async () => { const entry = (await api('/api/sessions')).sessions[0]; if (entry?.status === 'failed' || entry?.status === 'limited') throw new Error(`turn failed: ${await failureDetail(entry)}`); return entry?.turn_count === count && entry.status === 'completed'; }, `durable turn ${count}`);
   await waitPage("document.querySelector('#cancel').hidden && !document.querySelector('#sessions-refresh').disabled", 'UI saved');
 }
+async function selectModel(id) {
+  await click('#settings-button'); await click('#settings-models-tab');
+  await waitPage("document.querySelectorAll('.model-row').length===2", 'model rows ready');
+  await evaluate(`Array.from(document.querySelectorAll('.model-row')).find(row=>row.querySelector('strong')?.textContent===${JSON.stringify(id)}).querySelector('.set-default').click()`);
+  await waitFor(async()=> (await api('/api/model-settings')).default?.model_id===id, 'default saved');
+  await click('#settings-back');
+}
 async function screenshot(name) { const image = await cdp('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(join(output, `${name}.png`), Buffer.from(image.data, 'base64')); }
 const primary = () => requests.filter(request => !request.messages[0]?.content?.startsWith('Summarize the earlier'));
 try {
@@ -138,7 +148,7 @@ try {
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "window.__contextErrors=[];addEventListener('error',e=>window.__contextErrors.push(String(e.message)));addEventListener('unhandledrejection',e=>window.__contextErrors.push(String(e.reason)))" });
   await cdp('Page.navigate', { url: origin }); await waitPage("document.querySelector('#sessions-notice')?.textContent.includes('已保存在宿主本地') && !document.querySelector('#sessions-refresh').disabled", 'persistent session UI ready');
   await click('#settings-button'); await click('#settings-models-tab'); await click('#add-provider');
-  await fill('#provider-name-input', '隔离上下文验证'); await fill('#provider-api-base-input', modelBase); await fill('#provider-models-input', 'context-fixture'); await click('#provider-save');
+  await fill('#provider-name-input', '隔离上下文验证'); await fill('#provider-api-base-input', modelBase); await fill('#provider-models-input', 'context-fixture\ncontext-other'); await click('#provider-save');
   await waitPage("!document.querySelector('#provider-dialog').open && document.querySelector('[data-model-context]')", 'provider saved from UI');
   await click('[data-model-context="context-fixture"]'); await fill('#model-context-tokens', '16384');
   await screenshot('model-window-setting');
@@ -189,6 +199,29 @@ try {
   await click('#new-chat'); await submit(`FORGED_READ ${artifactUri}`, 1);
   const foreign = primary().at(-1);
   check('another conversation cannot gain archive access from a supplied URI', !String(foreign.messages.at(-1).content).includes('ARTIFACT_31415') && !JSON.stringify(foreign).includes('FIRST_MARKER'));
+  await click('#new-chat'); await submit('PRIVATE_ROUTE initial', 1);
+  const privateSession = (await api('/api/sessions')).sessions[0];
+  const requestCount = requests.length, summaryCount = summaries;
+  await selectModel('context-other');
+  await fill('#prompt', 'cannot transfer this history'); await click('#send');
+  await waitPage("document.body.innerText.includes('请新建会话')", 'actionable model history error');
+  const unchanged = await api(`/api/sessions/${privateSession.id}`);
+  check('incompatible model switch shows a new-session instruction without model or summary calls', requests.length===requestCount && summaries===summaryCount);
+  check('rejected switch neither saves a new turn nor changes the session revision', unchanged.session.revision===privateSession.revision && unchanged.session.turn_count===1);
+  check('rejected switch neither auto-creates a session nor exposes private replay data', (await api('/api/sessions')).sessions.length===3 && !await evaluate("document.body.innerText.includes('PRIVATE_PROTOCOL_REASONING')"));
+  await screenshot('incompatible-model-history');
+  await selectModel('context-fixture'); await cdp('Page.reload', {ignoreCache:true});
+  await waitPage("document.querySelectorAll('#timeline .turn').length===1 && !document.querySelector('#sessions-refresh').disabled", 'private saved history reloaded');
+  await submit('PRIVATE_ROUTE same model', 2);
+  check('same-route continuation returns original private protocol fields without sending origin metadata', primary().at(-1).messages.some(m=>m.reasoning_content==='PRIVATE_PROTOCOL_REASONING') && !JSON.stringify(primary().at(-1)).includes('"route"'));
+  await stop(host); await startHost(origin); await cdp('Page.reload',{ignoreCache:true});
+  await waitPage("document.querySelectorAll('#timeline .turn').length===2 && !document.querySelector('#sessions-refresh').disabled", 'private history after restart');
+  await submit('CONTINUE_PRIVATE_AFTER_RESTART',3);
+  check('private replay route survives actual process restart', primary().at(-1).messages.some(m=>m.reasoning_content==='PRIVATE_PROTOCOL_REASONING'));
+  await selectModel('context-other'); await click('#new-chat'); await submit('NORMAL_ON_OTHER',1);
+  check('an explicitly created new session uses the new model with no foreign history', primary().at(-1).model==='context-other' && !JSON.stringify(primary().at(-1)).includes('PRIVATE_PROTOCOL_REASONING'));
+  await selectModel('context-fixture'); await submit('NORMAL_SWITCH_BACK',2);
+  check('ordinary history can switch models and retain its earlier user turn', primary().at(-1).model==='context-fixture' && primary().at(-1).messages.some(m=>m.content==='NORMAL_ON_OTHER'));
   check('no browser unhandled exceptions or fixture failures', (await evaluate('window.__contextErrors')).length === 0 && errors.length === 0);
   await writeFile(join(output, 'result.json'), JSON.stringify({ passed:true, checks, summaries, model_requests:requests.length, real_provider:false, isolated:true }, null, 2));
   console.log(`PASS ${checks.length} context end-to-end assertions`);

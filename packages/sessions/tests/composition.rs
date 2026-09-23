@@ -33,7 +33,7 @@ impl Model for ModelFixture {
             self.summaries.fetch_add(1, Ordering::SeqCst);
             vec![
                 ModelEvent::Text(
-                    "Earlier settled work is complete. Preserve the user's fact 27182.".into(),
+                    serde_json::to_string(&compaction::TaskSummary { goal: "Earlier settled work is complete. Preserve the user's fact 27182.".into(), ..Default::default() }).unwrap(),
                 ),
                 ModelEvent::Finish(FinishReason::Stop),
                 ModelEvent::End,

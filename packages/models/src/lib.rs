@@ -114,6 +114,13 @@ struct Router {
 
 #[async_trait]
 impl Model for Router {
+    fn validate_history(&self, messages: &[Message], options: &ModelOptions) -> Result<()> {
+        let bound = options.model.as_ref().and_then(|key| lock(&self.bindings).get(key).cloned())
+            .ok_or_else(|| invalid("model management requires the host's ManagedRuntime"))?;
+        let mut effective = options.clone();
+        effective.model = Some(bound.model.clone());
+        bound.adapter.validate_history(messages, &effective)
+    }
     fn context_window_tokens(&self, options: &ModelOptions) -> Option<u64> {
         let bound = options
             .model
@@ -642,6 +649,16 @@ pub struct ManagedRuntime {
     manager: ModelManager,
 }
 impl AgentRuntime for ManagedRuntime {
+    fn validate_history(&self, messages: &[Message], options: &ModelOptions) -> Result<()> {
+        if options.model.is_some() {
+            return Err(invalid("ManagedRuntime selects the configured default; per-run override is not enabled"));
+        }
+        let binding = self.manager.bind()?;
+        let mut effective = options.clone();
+        effective.model = Some(binding.id.clone());
+        self.manager.inner.router.validate_history(messages, &effective)?;
+        self.runtime.validate_history(messages, &effective)
+    }
     fn start(&self, mut request: RunRequest) -> Result<RunHandle> {
         if request.model_options.model.is_some() {
             return Err(invalid(
@@ -652,6 +669,7 @@ impl AgentRuntime for ManagedRuntime {
             .map_err(|_| invalid("a Tokio runtime is required"))?;
         let binding = self.manager.bind()?;
         request.model_options.model = Some(binding.id.clone());
+        self.manager.inner.router.validate_history(&request.messages, &request.model_options)?;
         let handle = self.runtime.start(request)?;
         let session = handle.session();
         executor.spawn(async move {
