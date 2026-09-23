@@ -19,7 +19,7 @@ impl Model for WaitingModel {
 fn manager() -> models::ModelManager {
     let manager = models::ModelManager::open(Arc::new(Settings::default()), false).unwrap();
     manager.upsert(serde_json::from_value(serde_json::json!({
-        "revision":0,"id":"fixture","name":"fixture","api_base":"https://example.invalid/v1",
+        "revision":0,"id":"fixture","name":"fixture","protocol":"chat_completions","api_base":"https://example.invalid/v1",
         "models":[{"id":"never-called","enabled":true,"context_window_tokens":null}]
     })).unwrap()).unwrap();
     manager

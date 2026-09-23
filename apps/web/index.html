@@ -197,12 +197,14 @@
   <dialog id="provider-dialog">
     <form method="dialog" id="provider-form">
       <div class="dialog-head"><div><p class="eyebrow">MODEL PROVIDER</p><h2 id="provider-dialog-title">添加供应商</h2></div></div>
-      <p class="dialog-copy">仅支持 OpenAI 兼容接口。留空 API Key 会保留原凭据，勾选清除才会删除。</p>
+      <p class="dialog-copy">选择实际接口协议。修改端点或协议时需重新填写密钥，或明确清除；其他修改可留空保留。</p>
       <label>供应商名称<input id="provider-name-input" type="text" maxlength="80" autocomplete="off" required></label>
+      <label>接口协议<select id="provider-protocol-input"><option value="chat_completions">Chat Completions</option><option value="responses">OpenAI Responses</option><option value="messages">Anthropic Messages</option></select></label>
       <label>API Base<input id="provider-api-base-input" type="url" maxlength="2048" placeholder="https://api.example.com/v1" autocomplete="off" required></label>
       <label>API Key<input id="provider-key-input" type="password" maxlength="4096" placeholder="留空以保留已保存的密钥" autocomplete="new-password"></label>
       <label class="checkbox-label"><input id="provider-clear-key" type="checkbox"> 清除已保存的 API Key</label>
       <label>模型 ID（每行一个）<textarea id="provider-models-input" rows="6" placeholder="例如：gpt-4o-mini"></textarea></label>
+      <details id="provider-generation" class="model-advanced" hidden><summary>推理设置（可选）</summary><label>协议参数 JSON<textarea id="provider-generation-input" rows="3" maxlength="16384" placeholder="{}" spellcheck="false"></textarea></label><p id="provider-generation-hint" class="dialog-copy"></p></details>
       <p id="provider-form-error" class="error" role="alert"></p>
       <div class="dialog-actions"><button id="provider-discover" class="secondary" type="button">获取模型</button><button value="cancel" class="secondary" type="button">取消</button><button id="provider-save" value="default" class="primary" type="submit">保存</button></div>
     </form>
@@ -215,6 +217,15 @@
       <label>模型 ID<input id="model-id-input" type="text" maxlength="512" autocomplete="off" required></label>
       <label>上下文窗口（tokens，可选）<input id="model-context-tokens" type="number" min="1" max="1000000000" step="1" inputmode="numeric" placeholder="未知时留空，不会猜测模型容量"></label>
       <p class="dialog-copy">填写此供应商实际部署的模型窗口；系统会预留输出空间。留空继续使用字节预算保护。</p>
+      <details id="model-capabilities" class="model-advanced"><summary>模型能力与输出上限</summary>
+        <p class="dialog-copy">填写该模型实际支持的能力；未知保持未知，不根据模型名称猜测。</p>
+        <label>工具调用<select data-model-cap="tools"><option value="">未知</option><option value="true">支持</option><option value="false">不支持</option></select></label>
+        <label>图片输入<select data-model-cap="images"><option value="">未知</option><option value="true">支持</option><option value="false">不支持</option></select></label>
+        <label>Temperature<select data-model-cap="temperature"><option value="">未知</option><option value="true">支持</option><option value="false">不支持</option></select></label>
+        <label>Top P<select data-model-cap="top_p"><option value="">未知</option><option value="true">支持</option><option value="false">不支持</option></select></label>
+        <label>停止序列<select data-model-cap="stop"><option value="">未知</option><option value="true">支持</option><option value="false">不支持</option></select></label>
+        <label>最大输出（tokens）<input id="model-max-output" type="number" min="1" max="1000000000" step="1" placeholder="未知时留空"></label>
+      </details>
       <p id="model-form-error" class="error" role="alert"></p>
       <div class="dialog-actions"><button value="cancel" class="secondary" type="button">取消</button><button id="model-save" value="default" class="primary" type="submit">添加</button></div>
     </form>

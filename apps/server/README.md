@@ -14,4 +14,6 @@ Shell 的流式归档适配器与结果变换器共享同一个 `SpillPlugin::ar
 
 `session_routes` 只解析部署目录、处理 HTTP 鉴权并生成安全展示投影，启动流程复用 `application::sessions::SessionApplication`。不再保留本地 `sessions/store`、规则扫描器或会话执行包装器的第二份实现。Skills 的环境变量在产品层解析，实际根选择使用扩展接口及配置的工作空间。
 
+固定模型与模型管理共用 Providers 工厂，支持 Chat Completions、Responses、Messages。固定入口通过 `AGENT_MODEL_PROTOCOL` 明确协议、`AGENT_MODEL_ENDPOINT` 提供完整端点；常规 Web 从设置页保存协议和密钥。新建空配置有效，不用假模型掩盖缺失；协议、能力和历史检查均保留扩展层职责。
+
 必要验证：`cargo test -p server`、`cargo test -p server --no-default-features --bin server session_routes::tests`。真实 Web 重启流程见 [浏览器测试](../web/test/README.md)。

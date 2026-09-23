@@ -21,12 +21,12 @@ const MODEL_SETTINGS_FIXTURE = Object.freeze({
   providers: [
     {
       id: 'fixture-openai', name: 'Fixture OpenAI', api_base: 'http://127.0.0.1:9999/v1',
-      has_key: true, builtin: false,
+      has_key: true, builtin: false, protocol: 'chat_completions', generation: {},
       models: [{ id: 'fixture-chat', enabled: true }, { id: 'fixture-code', enabled: true }],
     },
     {
       id: 'fixture-local', name: 'Fixture Local', api_base: 'http://127.0.0.1:9998/v1',
-      has_key: false, builtin: true,
+      has_key: false, builtin: true, protocol: 'chat_completions', generation: {},
       models: [{ id: 'fixture-small', enabled: false }],
     },
   ],

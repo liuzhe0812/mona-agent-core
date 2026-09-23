@@ -1,7 +1,7 @@
 import { RunView, requestId } from '../../packages/client/src/index.mjs';
 import { HttpAgentClient } from '../../packages/client/src/http.mjs';
 import { TauriAgentClient } from '../../packages/client/src/tauri.mjs';
-import { ModelSettingsClient, createProviderId, parseContextWindow } from './model-settings.mjs';
+import { ModelSettingsClient, createProviderId, parseContextWindow, MODEL_PROTOCOLS, modelProtocol, normalizeCapabilities as normalizeModelCapabilities, parseGeneration } from './model-settings.mjs';
 import { CapabilitiesClient } from './capabilities.mjs';
 import { SpillClient } from './spill.mjs';
 import { TurnView } from './run-view.mjs';
@@ -63,6 +63,8 @@ const providerDialog = $('#provider-dialog');
 const providerForm = $('#provider-form');
 const providerDialogTitle = $('#provider-dialog-title');
 const providerNameInput = $('#provider-name-input');
+const providerProtocolInput = $('#provider-protocol-input');
+const providerGenerationInput = $('#provider-generation-input');
 const providerApiBaseInput = $('#provider-api-base-input');
 const providerKeyInput = $('#provider-key-input');
 const providerClearKey = $('#provider-clear-key');
@@ -118,11 +120,14 @@ function normalizeModelSettings(value) {
   const providers = Array.isArray(value?.providers) ? value.providers.map((provider) => ({
     id: typeof provider?.id === 'string' ? provider.id : '',
     name: typeof provider?.name === 'string' ? provider.name : '',
+    protocol: modelProtocol(provider?.protocol),
+    generation: provider?.generation || {},
     api_base: typeof provider?.api_base === 'string' ? provider.api_base : '',
     has_key: provider?.has_key === true,
     builtin: provider?.builtin === true,
     models: Array.isArray(provider?.models) ? provider.models
       .map((model) => ({ id: typeof model?.id === 'string' ? model.id : '', enabled: model?.enabled !== false,
+        capabilities: normalizeModelCapabilities(model?.capabilities),
         context_window_tokens: Number.isSafeInteger(model?.context_window_tokens) && model.context_window_tokens > 0 ? model.context_window_tokens : null }))
       .filter((model) => model.id.length > 0) : [],
   })).filter((provider) => provider.id && provider.name) : [];
@@ -235,7 +240,8 @@ function providerModelsFromLines(lines, previousModels = []) {
   const previous = new Map(previousModels.map((model) => [model.id, model]));
   const ids = [...new Set(String(lines || '').split(/\r?\n/).map((value) => value.trim()).filter(Boolean))];
   return ids.map((id) => ({ id, enabled: previous.get(id)?.enabled !== false,
-    context_window_tokens: previous.get(id)?.context_window_tokens ?? null }));
+    context_window_tokens: previous.get(id)?.context_window_tokens ?? null,
+    capabilities: normalizeModelCapabilities(previous.get(id)?.capabilities) }));
 }
 
 function providerSaveBody(provider, fields = {}) {
@@ -244,9 +250,11 @@ function providerSaveBody(provider, fields = {}) {
     id: provider?.id || fields.id,
     name: fields.name ?? provider?.name ?? '',
     api_base: fields.api_base ?? provider?.api_base ?? '',
+    protocol: modelProtocol(fields.protocol ?? provider?.protocol),
     models: fields.models ?? provider?.models ?? [],
   };
   if (fields.api_key) body.api_key = fields.api_key;
+  if (fields.generation !== undefined) body.generation = fields.generation;
   if (fields.clear_key) body.clear_key = true;
   return body;
 }
@@ -479,7 +487,7 @@ function renderProviderDetail(provider) {
   if (!provider) {
     providerLogo.textContent = 'M';
     $('#provider-name').textContent = '选择供应商';
-    providerKind.textContent = 'OpenAI 兼容';
+    providerKind.textContent = '接口协议';
     providerApiBase.textContent = settingsTransport === 'tauri'
       ? 'Tauri 宿主尚未接入模型设置。'
       : (settingsTransport === 'unavailable'
@@ -499,7 +507,7 @@ function renderProviderDetail(provider) {
   }
   providerLogo.textContent = (provider.name.trim()[0] || 'M').toUpperCase();
   $('#provider-name').textContent = provider.name;
-  providerKind.textContent = provider.builtin ? '内置 · OpenAI 兼容' : 'OpenAI 兼容';
+  providerKind.textContent = `${provider.builtin ? '内置 · ' : ''}${MODEL_PROTOCOLS[provider.protocol]}`;
   providerApiBase.textContent = provider.api_base || '未设置 API Base';
   editProvider.disabled = false;
   deleteProvider.disabled = provider.builtin;
@@ -614,6 +622,10 @@ function openProviderEditor(provider = null) {
   providerEditorModels = (provider?.models || []).map((model) => ({ ...model }));
   providerDialogTitle.textContent = provider ? '编辑供应商' : '添加供应商';
   providerNameInput.value = provider?.name || '';
+  providerProtocolInput.value = provider?.protocol || 'chat_completions';
+  providerGenerationInput.value = Object.keys(provider?.generation || {}).length ? JSON.stringify(provider.generation, null, 2) : '';
+  $('#provider-generation').open = false;
+  syncProviderProtocol();
   providerApiBaseInput.value = provider?.api_base || '';
   providerKeyInput.value = '';
   providerKeyInput.placeholder = provider?.has_key ? '留空以保留已保存的密钥' : '仅本次提交发送，不会回显';
@@ -627,16 +639,27 @@ function openProviderEditor(provider = null) {
   providerNameInput.focus();
 }
 
+function syncProviderProtocol() {
+  const protocol = providerProtocolInput.value;
+  $('#provider-generation').hidden = protocol === 'chat_completions';
+  $('#provider-generation-hint').textContent = protocol === 'responses'
+    ? '支持 reasoning（effort、summary）；不填写则使用端点默认值。'
+    : '支持 thinking 和 output_config；启用 thinking 的预算必须低于本轮输出上限。';
+}
+providerProtocolInput.addEventListener('change', () => { providerGenerationInput.value = ''; syncProviderProtocol(); });
+
 function editorProviderFields() {
   const name = providerNameInput.value.trim();
   const apiBase = providerApiBaseInput.value.trim().replace(/\/$/, '');
   const apiKey = providerKeyInput.value;
   const models = providerModelsFromLines(providerModelsInput.value, providerEditorModels);
-  return { name, api_base: apiBase, api_key: apiKey, clear_key: providerClearKey.checked, models };
+  const protocol = modelProtocol(providerProtocolInput.value);
+  return { name, protocol, generation: parseGeneration(providerGenerationInput.value, protocol), api_base: apiBase, api_key: apiKey, clear_key: providerClearKey.checked, models };
 }
 
 async function discoverInProviderEditor() {
-  const fields = editorProviderFields();
+  let fields;
+  try { fields = editorProviderFields(); } catch (error) { providerFormError.textContent = error.message; return; }
   if (!fields.api_base) {
     providerFormError.textContent = '请先填写 API Base。';
     return;
@@ -644,7 +667,7 @@ async function discoverInProviderEditor() {
   providerDiscover.disabled = true;
   providerFormError.textContent = '';
   try {
-    const body = { api_base: fields.api_base };
+    const body = { api_base: fields.api_base, protocol: fields.protocol };
     if (providerEditorId) body.provider_id = providerEditorId;
     if (fields.api_key) body.api_key = fields.api_key;
     if (fields.clear_key) body.clear_key = true;
@@ -668,13 +691,14 @@ async function discoverCurrentProvider() {
   discoverModels.disabled = true;
   setSettingsNotice('正在获取模型…');
   try {
-    const result = await modelSettings.discover({ provider_id: provider.id, api_base: provider.api_base });
+    const result = await modelSettings.discover({ provider_id: provider.id, api_base: provider.api_base, protocol: provider.protocol });
     const discovered = Array.isArray(result?.models) ? result.models.filter((model) => typeof model === 'string') : [];
     if (!discovered.length) throw new Error('供应商没有返回模型。');
     const existing = new Map(provider.models.map((model) => [model.id, model]));
     const models = [...new Set([...provider.models.map((model) => model.id), ...discovered])]
       .map((id) => ({ id, enabled: existing.get(id)?.enabled !== false,
-        context_window_tokens: existing.get(id)?.context_window_tokens ?? null }));
+        context_window_tokens: existing.get(id)?.context_window_tokens ?? null,
+        capabilities: normalizeModelCapabilities(existing.get(id)?.capabilities) }));
     await saveProviderRecord(provider, { revision, models }, `已获取并保存 ${discovered.length} 个模型`);
   } catch (error) {
     await handleModelSettingsError(error);
@@ -711,7 +735,11 @@ function openModelEditor(model = null) {
   modelIdInput.value = model?.id ?? '';
   modelIdInput.disabled = Boolean(model);
   $('#model-context-tokens').value = model?.context_window_tokens ?? '';
-  $('#model-dialog h2').textContent = model ? '模型上下文窗口' : '添加模型';
+  $('#model-dialog h2').textContent = model ? '模型设置' : '添加模型';
+  const caps = normalizeModelCapabilities(model?.capabilities);
+  for (const select of modelForm.querySelectorAll('[data-model-cap]')) select.value = caps[select.dataset.modelCap] == null ? '' : String(caps[select.dataset.modelCap]);
+  $('#model-max-output').value = caps.max_output_tokens ?? '';
+  $('#model-capabilities').open = false;
   modelSave.textContent = model ? '保存' : '添加';
   modelFormError.textContent = '';
   modelSave.disabled = false;
@@ -730,8 +758,12 @@ async function addManualModel() {
   if (!modelEditor || provider.id !== modelEditor.provider_id) {
     modelFormError.textContent = '供应商已切换，请重新打开模型编辑。'; return false;
   }
-  let contextWindow;
-  try { contextWindow = parseContextWindow($('#model-context-tokens').value); }
+  let contextWindow, caps;
+  try {
+    contextWindow = parseContextWindow($('#model-context-tokens').value);
+    caps = Object.fromEntries([...modelForm.querySelectorAll('[data-model-cap]')].map(node => [node.dataset.modelCap, node.value === '' ? null : node.value === 'true']));
+    caps.max_output_tokens = parseContextWindow($('#model-max-output').value);
+  }
   catch (error) { modelFormError.textContent = error.message; return false; }
   if (!modelEditor.model_id && provider.models.some((model) => model.id === id)) {
     modelFormError.textContent = '该模型已经存在。';
@@ -741,8 +773,8 @@ async function addManualModel() {
   const saved = await saveProviderRecord(provider, {
     revision: modelEditor.revision,
     models: modelEditor.model_id ? provider.models.map(model => model.id === modelEditor.model_id
-      ? { ...model, context_window_tokens: contextWindow } : model)
-      : [...provider.models, { id, enabled: true, context_window_tokens: contextWindow }],
+      ? { ...model, context_window_tokens: contextWindow, capabilities: caps } : model)
+      : [...provider.models, { id, enabled: true, context_window_tokens: contextWindow, capabilities: caps }],
   }, modelEditor.model_id ? '模型窗口已保存，仅影响新任务' : '模型已添加');
   modelSave.disabled = false;
   if (saved) modelDialog.close();
@@ -1163,7 +1195,8 @@ providerDiscover.addEventListener('click', () => { void discoverInProviderEditor
 providerForm.addEventListener('submit', (event) => {
   event.preventDefault();
   void (async () => {
-    const fields = editorProviderFields();
+    let fields;
+    try { fields = editorProviderFields(); } catch (error) { providerFormError.textContent = error.message; return; }
     if (!fields.name || !fields.api_base) {
       providerFormError.textContent = '请填写供应商名称和 API Base。';
       return;

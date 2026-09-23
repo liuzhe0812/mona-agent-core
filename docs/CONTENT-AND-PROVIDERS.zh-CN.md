@@ -41,6 +41,12 @@ Core 生成 call_id/状态关联，ResultTransform 不得篡改身份和状态�
 
 API能表示图片不等于任何指定模型都具备视觉能力；宿主选用支持对应能力的模型并完成联调。
 
+### Responses / Messages
+
+两种原生协议通过相同 Model 接口接入。Responses 使用本地 input、function_call/function_call_output、store:false 和加密推理回传；Messages 使用 system、tool_use/tool_result 及签名 thinking 内容块。模型发现、协议参数与三态能力由模型管理配置，不加入核心执行机制。
+
+私有信封 `{route, items}` 保留原始 output/content 顺序；回传前校对可见正文和工具身份，不转换其他协议的签名。图片使用各协议的原生块，Resource 必须由显式解析组件提供内容。具体参数、大小限制和未实现内容统一见 [Providers](../packages/providers/README.md)。
+
 ## 5. 参数与模型选择
 
 RunRequest.model_options 是本次运行默认值；辅助调用通过 RunContext.model 发出的 ModelRequest.options 可明确覆盖字段，否则继承默认值。

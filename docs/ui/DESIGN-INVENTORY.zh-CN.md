@@ -20,8 +20,8 @@
 | `settings-components` | 设置 → Agent 组件 | `index.html`、`styles.css`、`capabilities.mjs` | governed | design、capability tests |
 | `settings-tools` | 设置 → Agent 工具 | `index.html`、`styles.css`、`capabilities.mjs` | governed | design、capability tests |
 | `settings-models` | 设置 → 模型设置 | `index.html`、`styles.css`、`model-settings.mjs` | governed | design、model tests |
-| `provider-dialog` | 添加/编辑供应商 | `index.html`、`styles.css`、`app.mjs` | governed | design |
-| `model-dialog` | 添加模型 | `index.html`、`styles.css`、`app.mjs` | governed | design、model tests |
+| `provider-dialog` | 供应商、接口协议与原生推理参数 | `index.html`、`styles.css`、`app.mjs` | governed | design、protocols-e2e |
+| `model-dialog` | 模型窗口、三态能力与输出上限 | `index.html`、`styles.css`、`app.mjs` | governed | design、model tests、protocols-e2e |
 | `settings-appearance` | 设置 → 外观 | `appearance.mjs`、`appearance.css`、`theme.mjs` | governed | design、themes |
 | `session-history` | 左侧任务列表与历史恢复 | `sessions*.mjs/css` | governed | sessions、sidebar |
 | `spill-result` | 工具详情中的长结果 | `spill.mjs`、`run-view.mjs`、`styles.css` | governed | renderer、spill tests |

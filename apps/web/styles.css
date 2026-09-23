@@ -713,6 +713,11 @@ details[open] > summary > .chevron { transform: rotate(90deg); }
 .model-picker-row strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ui-text-13); font-weight: var(--ui-weight-medium); }
 .model-picker-row small { flex: 0 0 auto; color: var(--text-secondary); font-size: var(--ui-text-11); white-space: nowrap; }
 
+.model-advanced { margin-block: var(--ui-space-3); }
+.model-advanced > summary { cursor: pointer; color: var(--text-secondary); font-size: var(--ui-text-13); }
+.model-advanced > summary:hover { color: var(--text-primary); }
+.model-advanced[open] > summary { margin-bottom: var(--ui-space-3); }
+
 .sidebar-scrim { display: none; }
 
 @media (max-width: 1000px) {

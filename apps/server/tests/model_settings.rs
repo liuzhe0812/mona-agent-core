@@ -53,6 +53,7 @@ fn provider(revision: u64, id: &str, api_base: &str) -> Value {
         "id": id,
         "name": format!("{id} provider"),
         "api_base": api_base,
+        "protocol": "chat_completions",
         "api_key": API_KEY,
         "clear_key": false,
         "models": [
@@ -233,8 +234,9 @@ async fn management_uses_revision_conflicts_and_controls_default_visibility_and_
     let models = view["providers"][0]["models"]
         .as_array()
         .expect("model list");
-    assert_eq!(models[0], json!({"id": "alpha", "enabled": false, "context_window_tokens": null}));
-    assert_eq!(models[1], json!({"id": "beta", "enabled": true, "context_window_tokens": null}));
+    let unknown = serde_json::to_value(models::ModelCapabilities::default()).unwrap();
+    assert_eq!(models[0], json!({"id": "alpha", "enabled": false, "context_window_tokens": null, "capabilities": unknown}));
+    assert_eq!(models[1], json!({"id": "beta", "enabled": true, "context_window_tokens": null, "capabilities": unknown}));
 
     let (status, _, view) = call(
         router.clone(),

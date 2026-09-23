@@ -251,7 +251,7 @@ fn retry_after_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
         .and_then(|seconds| seconds.checked_mul(1000))
 }
 
-async fn classify_http_error(
+pub(crate) async fn classify_http_error(
     mut response: reqwest::Response,
     cancel: CancellationToken,
 ) -> AgentError {
@@ -337,6 +337,19 @@ fn classify_error_message(message: &str) -> Option<ProviderErrorClass> {
     }
 }
 
+// Anthropic reports input overflow as invalid_request_error, not a dedicated code.
+// Accept only its bounded, complete grammar; arbitrary quoted prompt text is not a signal.
+fn prompt_too_long(message: &str) -> bool {
+    let message = message.trim().trim_end_matches('.');
+    if message == "prompt is too long" { return true; }
+    if message.len() > 160 { return false; }
+    let Some(counts) = message.strip_prefix("prompt is too long: ") else { return false; };
+    let Some((input, maximum)) = counts.split_once(" tokens > ") else { return false; };
+    let Some(maximum) = maximum.strip_suffix(" maximum") else { return false; };
+    if input.is_empty() || maximum.is_empty() || !input.bytes().all(|c| c.is_ascii_digit()) || !maximum.bytes().all(|c| c.is_ascii_digit()) { return false; }
+    matches!((input.parse::<u64>(), maximum.parse::<u64>()), (Ok(input), Ok(maximum)) if maximum > 0 && input > maximum)
+}
+
 fn classify_provider_error_class(error: &Value, allow_message: bool) -> Option<ProviderErrorClass> {
     let object = error.as_object();
     for field in ["code", "type"] {
@@ -347,6 +360,10 @@ fn classify_provider_error_class(error: &Value, allow_message: bool) -> Option<P
         }
     }
     if allow_message {
+        if error.get("type").and_then(Value::as_str) == Some("invalid_request_error")
+            && error.get("message").and_then(Value::as_str).is_some_and(prompt_too_long) {
+            return Some((ErrorCode::ModelContextWindow, "model context window exceeded"));
+        }
         object.and_then(|object| object.get("message")).and_then(Value::as_str)
             .and_then(classify_error_message)
             .or_else(|| error.as_str().and_then(classify_error_message))
@@ -355,7 +372,7 @@ fn classify_provider_error_class(error: &Value, allow_message: bool) -> Option<P
     }
 }
 
-fn classify_provider_error(error: &Value) -> AgentError {
+pub(crate) fn classify_provider_error(error: &Value) -> AgentError {
     let (code, message) = classify_provider_error_class(error, true)
         .unwrap_or((ErrorCode::ModelRequest, "provider emitted an error object"));
     AgentError::new(code, message)

@@ -64,6 +64,8 @@ pub fn from_environment() -> Result<ModelManager, Box<dyn std::error::Error>> {
         manager.seed(
             UpsertProvider {
                 revision: 0,
+                protocol: models::Protocol::parse(&std::env::var("AGENT_MODEL_PROTOCOL").unwrap_or_else(|_| "chat_completions".into()))?,
+                generation: None,
                 id: "environment".into(),
                 name: "默认供应商".into(),
                 api_base: endpoint,
@@ -71,6 +73,7 @@ pub fn from_environment() -> Result<ModelManager, Box<dyn std::error::Error>> {
                 clear_key: false,
                 models: vec![ModelEntry {
                     id: model,
+                    capabilities: models::ModelCapabilities::default(),
                     enabled: true,
                     context_window_tokens: std::env::var("AGENT_MODEL_CONTEXT_TOKENS").ok()
                         .map(|value| value.parse::<u64>()).transpose()?,
@@ -156,7 +159,7 @@ impl From<AgentError> for ApiError {
     fn from(error: AgentError) -> Self {
         if error.message.starts_with("settings_conflict:") {
             Self(StatusCode::CONFLICT, error.message)
-        } else if error.code == ErrorCode::Configuration {
+        } else if matches!(error.code, ErrorCode::Configuration | ErrorCode::Unsupported) {
             Self(StatusCode::BAD_REQUEST, error.message)
         } else {
             Self(

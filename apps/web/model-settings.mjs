@@ -111,6 +111,33 @@ export function parseContextWindow(value) {
   return tokens;
 }
 
+export const MODEL_PROTOCOLS = Object.freeze({ chat_completions: 'Chat Completions', responses: 'OpenAI Responses', messages: 'Anthropic Messages' });
+export function modelProtocol(value) {
+  if (!Object.hasOwn(MODEL_PROTOCOLS, value)) throw new Error('请选择受支持的模型接口协议。');
+  return value;
+}
+export function normalizeCapabilities(value = {}) {
+  const result = {};
+  for (const key of ['tools', 'images', 'temperature', 'top_p', 'stop']) {
+    if (value[key] != null && typeof value[key] !== 'boolean') throw new Error('模型能力必须为支持、不支持或未知。');
+    result[key] = value[key] ?? null;
+  }
+  result.max_output_tokens = parseContextWindow(value.max_output_tokens);
+  return result;
+}
+export function parseGeneration(value, protocol) {
+  modelProtocol(protocol);
+  if (protocol === 'chat_completions') return undefined;
+  let parsed;
+  try { parsed = JSON.parse(String(value).trim() || '{}'); } catch { throw new Error('推理设置必须是有效 JSON 对象；不需要时留空。'); }
+  const allowed = protocol === 'responses' ? ['reasoning'] : ['thinking', 'output_config'];
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object' || Object.keys(parsed).some(key => !allowed.includes(key))) {
+    throw new Error(`此协议仅允许推理设置：${allowed.join('、')}。`);
+  }
+  if (new TextEncoder().encode(JSON.stringify(parsed)).length > 16384) throw new Error('推理设置不能超过 16 KiB。');
+  return parsed;
+}
+
 export function createProviderId() {
   if (typeof globalThis.crypto?.randomUUID !== 'function') throw new Error('当前浏览器不支持安全的供应商 ID。');
   return globalThis.crypto.randomUUID();

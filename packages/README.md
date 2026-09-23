@@ -10,9 +10,9 @@
 |---|---|---|
 | [api](api/README.md) | 模型、工具、运行、事件和 Plugin 的公共契约 | 内层组件共用；见 [插件契约](../docs/PLUGIN-GUIDE.zh-CN.md) |
 | [runtime](runtime/README.md) | 唯一执行循环、模型网关、工具调度、累计历史与本轮请求预算、权限与生命周期 | 核心层，可独立嵌入；见 [架构](../docs/ARCHITECTURE.zh-CN.md) |
-| [providers](providers/README.md) | 具体模型协议、鉴权、历史回传检查与请求/响应转换 | 宿主按模型协议选择；见 [内容与模型协议](../docs/CONTENT-AND-PROVIDERS.zh-CN.md) |
+| [providers](providers/README.md) | Chat Completions / Responses / Messages、能力校验、鉴权及私有历史回传 | 宿主按模型协议选择；见 [内容与模型协议](../docs/CONTENT-AND-PROVIDERS.zh-CN.md) |
 | [tools](tools/README.md) | 文件、命令和检索工具，以及可注入的流式输出归档接口 | 当前 Web 使用四工具默认组合；其他宿主按场景选择，沿用公共 `Tool` 接口 |
-| [models](models/README.md) | 供应商设置、凭据、模型目录、默认选择和路由 | 可选模型管理组件，由可信宿主接入 |
+| [models](models/README.md) | 协议与供应商设置、凭据、模型能力、目录及固定运行路由 | 可选模型管理组件，由可信宿主接入 |
 | [sessions](sessions/README.md) | 线性持久会话、可靠检查点、工作集恢复和归档归属 | 扩展层；不依赖 Application/HTTP/Runtime 实现，宿主提供目录与授权 |
 | [instructions](instructions/README.md) | 工作空间规则发现、来源注入与派发前刷新检查 | 扩展层；普通接口或薄 Plugin，可信历史来源可注入 |
 | [skills](skills/README.md) | 技能发现、校验和模型可见的摘要目录 | 可选；指南和资源通过普通 `read` 渐进加载 |

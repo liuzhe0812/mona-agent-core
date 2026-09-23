@@ -10,6 +10,8 @@
 
 默认保留最多 32 个 Run，已完成记录 600 秒惰性过期；单 Run 回放窗口、订阅和输入记录有界。这里的 TTL 与 forget 只释放内存运行视图，不表示外部宿主持久会话必须删除。完整语义和接口表见 [统一应用接口](../../docs/APPLICATION-API.zh-CN.md)。
 
+模型协议或配置返回 Unsupported 时，应用使用固定的能力/参数不支持提示，引导检查模型设置；不将任意供应商或插件错误正文传给页面。该提示同样用于实时终态，不改变执行失败或重试语义。
+
 ## 可选会话适配
 
 启用 `application/sessions` 后，构造 `SessionApplication::new(store, app)`，调用 `start_turn(session_id, TurnRequest)`。Store、SessionSink 与 sessions::runtime 必须属于同一装配。适配器使用当前 ApplicationConfig 的真实初始/累计历史上限，并先预留当前系统消息成本；存储接纳失败不写入新轮次。接纳操作不因 HTTP/IPC 调用者断线而取消；相同已保存请求不会新建 Run。会话错误显式映射到现有 ApplicationError，不扩大通用 Bridge 的不可信输入面。

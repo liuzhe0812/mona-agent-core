@@ -1,11 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ModelSettingsClient, parseContextWindow } from './model-settings.mjs';
+import { ModelSettingsClient, parseContextWindow, modelProtocol, normalizeCapabilities, parseGeneration } from './model-settings.mjs';
 
 test('model capacity accepts unknown or positive bounded integers without guessing', () => {
   assert.equal(parseContextWindow(''), null); assert.equal(parseContextWindow(null), null);
   assert.equal(parseContextWindow(' 32768 '), 32768);
   for (const value of ['0', '-1', '1.5', 'Infinity', '8192 tokens', '1000000001']) assert.throws(() => parseContextWindow(value));
+});
+
+test('protocol selection, capability unknowns and bounded generation settings are explicit', () => {
+  for (const protocol of ['chat_completions', 'responses', 'messages']) assert.equal(modelProtocol(protocol), protocol);
+  assert.throws(() => modelProtocol('gemini')); assert.throws(() => modelProtocol(undefined));
+  assert.equal(normalizeCapabilities().images, null);
+  assert.equal(normalizeCapabilities({ images: false, tools: true }).images, false);
+  assert.throws(() => normalizeCapabilities({ tools: 'yes' }));
+  assert.deepEqual(parseGeneration('', 'messages'), {});
+  assert.deepEqual(parseGeneration('{"reasoning":{"effort":"low"}}', 'responses'), { reasoning: { effort: 'low' } });
+  assert.throws(() => parseGeneration('{"store":true}', 'responses'));
+  assert.throws(() => parseGeneration('{"thinking":{}}', 'responses'));
+  assert.throws(() => parseGeneration('[]', 'messages'));
 });
 
 test('management requests use bearer headers without cookies or redirects', async () => {

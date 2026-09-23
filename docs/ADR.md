@@ -128,3 +128,9 @@ Compaction 将目标、约束、纠正、决定、完成动作、未完成事项
 现有扩展点只能在 Run 开始之后处理请求，无法在接纳/摘要前拒绝不兼容历史，因此公共 Model/AgentRuntime 增加纯 validate_history，API_VERSION 为 9。核心层只调用检查，具体模型路由和协议判断留在 Providers/Models。SessionApplication 在同一存储接纳锁内先检查后保存；实际 start 针对绑定模型再检查，消除预检后的配置变化漏检。
 
 Chat 私有回传增加稳定 route 指纹，约束实际模型/端点/命名空间/私有参数，不包含密钥或瞬时绑定 ID。只发送原始协议字段，不发送来源元数据；普通历史允许切换，不兼容则明确要求用户新建会话，不转换、不自动新建、不回退。结构/指纹测试不能证明语义摘要质量或服务端别名始终对应同一模型。当前行为见[上下文管理](CONTEXT-MANAGEMENT.zh-CN.md)及[模型管理](MODEL-MANAGEMENT.zh-CN.md)。
+
+## ADR-057 原生模型协议属于扩展层
+
+Providers 增加 Responses 和 Messages，复用公共 ModelEvent、ProviderData、历史预检及 Runtime 网关，不新增核心机制或执行循环。两种原生协议共享有界 HTTP/SSE 传输，结束以协议终态为准；同块后续错误不能掩盖已输出内容。工具仍本地执行，会话仍本地保存，Responses 明确 store:false，不接入托管工具/远程会话。
+
+私有 output/content 块原顺序保存并校对可见正文及工具身份；不兼容则拒绝，不使用有损转换。模型协议、能力事实和推理配置由 Models 绑定，Web 只负责编辑和展示。设置格式 2 替换旧格式；端点或协议变更不能隐式转发已存密钥。输入/输出协议、能力与当前限制见 [Providers](../packages/providers/README.md)。

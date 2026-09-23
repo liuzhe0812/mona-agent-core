@@ -96,7 +96,18 @@ node apps/web/test/context-e2e.mjs
 
 同一脚本还从模型设置页切换两个模型，检查普通历史可继续、私有历史不兼容时显示新建会话提示且不新增轮次或发起模型/摘要调用、用户自行新建后可用，以及恢复原模型和实际重启后私有协议原值继续回传但不暴露到 UI。摘要夹具返回严格 TaskSummary；该浏览器验证证明接线和存储行为，不证明真实模型的语义摘要质量。
 
-## 9. 浏览器与证据边界
+## 9. Responses / Messages 原生协议
+
+```sh
+cargo build --offline -p server --target-dir target/context-validation
+node apps/web/test/protocols-e2e.mjs
+```
+
+使用正式页面配置两种协议、自定义 API Base、API Key、推理参数、模型窗口和三态能力。端点校验对应鉴权头；执行真实 Rust read 工具，并验证多轮工具结果、摘要调用、跨实际宿主进程重启的摘要与私有回传保存、普通历史跨协议续聊、不兼容历史在保存前拒绝，以及输出中取消。390px 下检查展开的能力编辑框边界；截图与结果默认写入 `target/browser-reports/protocols/`，可通过 `MONA_TEST_REPORT_DIR` 指定。
+
+端点、签名和摘要均为受控测试数据；该流程证明协议接线、保存和隔离，不证明真实供应商签名验证、图片语义或摘要质量。当前限制见 [Providers](../../../packages/providers/README.md)。
+
+## 10. 浏览器与证据边界
 
 浏览器脚本要求 Node 22+。Windows 默认 Edge，其他平台默认 `chromium`，可通过 `BROWSER_BIN` 指定。验证结论必须区分：
 

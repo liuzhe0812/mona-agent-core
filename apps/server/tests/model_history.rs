@@ -140,7 +140,7 @@ async fn incompatible_switch_is_rejected_before_saving_or_network_and_same_route
     manager
         .upsert(
             serde_json::from_value(
-                json!({"revision":0,"id":"local","name":"local","api_base":endpoint,
+                json!({"revision":0,"id":"local","name":"local","protocol":"chat_completions","api_base":endpoint,
         "models":[{"id":"alpha","enabled":true},{"id":"beta","enabled":true}]}),
             )
             .unwrap(),

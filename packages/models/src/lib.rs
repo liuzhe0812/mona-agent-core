@@ -6,7 +6,8 @@ mod storage;
 pub use storage::{EncryptedFileStore, SettingsStore};
 
 use api::*;
-use providers::{ChatConfig, ChatModel};
+pub use providers::{ModelCapabilities, Protocol};
+use providers::{create_model, ProviderConfig};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -27,6 +28,8 @@ fn invalid(message: &str) -> AgentError {
 pub struct ModelEntry {
     pub id: String,
     pub enabled: bool,
+    #[serde(default)]
+    pub capabilities: ModelCapabilities,
     /// Trusted per-provider/model capacity. None means unknown, never an inferred global default.
     #[serde(default)]
     pub context_window_tokens: Option<u64>,
@@ -42,6 +45,9 @@ pub struct Selection {
 /// Safe for the settings UI; neither the credential nor a credential prefix is returned.
 #[derive(Clone, Debug, Serialize)]
 pub struct ProviderView {
+    pub protocol: Protocol,
+    /// Only whitelisted native generation options, never arbitrary deployment extra_body.
+    pub generation: serde_json::Map<String, serde_json::Value>,
     pub id: String,
     pub name: String,
     pub api_base: String,
@@ -61,6 +67,8 @@ pub struct SettingsView {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpsertProvider {
+    pub protocol: Protocol,
+    pub generation: Option<serde_json::Map<String, serde_json::Value>>,
     pub revision: u64,
     pub id: String,
     pub name: String,
@@ -74,6 +82,7 @@ pub struct UpsertProvider {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DiscoverRequest {
+    pub protocol: Protocol,
     pub provider_id: Option<String>,
     pub api_base: String,
     pub api_key: Option<String>,
@@ -85,6 +94,7 @@ pub struct DiscoverRequest {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Provider {
+    protocol: Protocol,
     id: String,
     name: String,
     api_base: String,
@@ -172,7 +182,7 @@ impl ModelManager {
             Some(bytes) => serde_json::from_slice::<Document>(&bytes)
                 .map_err(|_| invalid("invalid model settings document"))?,
             None => Document {
-                version: 1,
+                version: 2,
                 revision: 0,
                 providers: vec![],
                 default: None,
@@ -199,16 +209,23 @@ impl ModelManager {
     pub fn seed(
         &self,
         input: UpsertProvider,
-        extra_body: serde_json::Map<String, serde_json::Value>,
+        mut extra_body: serde_json::Map<String, serde_json::Value>,
     ) -> Result<()> {
         let mut document = lock(&self.inner.document);
         if document.revision != 0 {
             return Ok(());
         }
+        if let Some(generation) = input.generation {
+            if input.protocol == Protocol::ChatCompletions && !generation.is_empty() {
+                return Err(invalid("generation editor is only available for native Responses/Messages; Chat deployment options stay host-owned"));
+            }
+            extra_body.extend(generation);
+        }
         let provider = Provider {
             id: input.id,
             name: input.name,
-            api_base: normalize_base(&input.api_base, self.inner.allow_http_loopback)?,
+            protocol: input.protocol,
+            api_base: normalize_base(&input.api_base, input.protocol, self.inner.allow_http_loopback)?,
             api_key: input.api_key,
             models: input.models,
             extra_body,
@@ -222,7 +239,7 @@ impl ModelManager {
                 model_id: m.id.clone(),
             });
         let next = Document {
-            version: 1,
+            version: 2,
             revision: 1,
             providers: vec![provider],
             default,
@@ -234,7 +251,7 @@ impl ModelManager {
     }
 
     fn validate(&self, doc: &Document) -> Result<()> {
-        if doc.version != 1 || doc.providers.len() > 32 {
+        if doc.version != 2 || doc.providers.len() > 32 {
             return Err(invalid(
                 "unsupported settings version or provider limit exceeded",
             ));
@@ -253,13 +270,14 @@ impl ModelManager {
             {
                 return Err(invalid("invalid or duplicate provider identifier/name"));
             }
-            normalize_base(&p.api_base, self.inner.allow_http_loopback)?;
+            normalize_base(&p.api_base, p.protocol, self.inner.allow_http_loopback)?;
             validate_key(p.api_key.as_deref())?;
             let mut models = BTreeSet::new();
             if p.models.is_empty() || p.models.len() > 256 {
                 return Err(invalid("a provider requires 1..256 models"));
             }
             for m in &p.models {
+                m.capabilities.validate()?;
                 if m.context_window_tokens.is_some_and(|window| window == 0 || window > 1_000_000_000) {
                     return Err(invalid("model context window must be 1..1000000000 tokens or null"));
                 }
@@ -290,7 +308,9 @@ impl ModelManager {
     }
 
     fn adapter(&self, provider: &Provider, model: &str) -> Result<Arc<dyn Model>> {
-        let mut config = ChatConfig::new(format!("{}/chat/completions", provider.api_base), model);
+        let mut config = ProviderConfig::new(provider.protocol, format!("{}{}", provider.api_base, provider.protocol.suffix()), model);
+        config.capabilities = provider.models.iter().find(|entry| entry.id == model)
+            .map(|entry| entry.capabilities.clone()).unwrap_or_default();
         config.api_key = provider.api_key.clone();
         config.allow_http_loopback = self.inner.allow_http_loopback;
         config.extra_body = provider.extra_body.clone();
@@ -298,7 +318,7 @@ impl ModelManager {
             .and_then(|entry| entry.context_window_tokens);
         // Signed/private replay data stays confined to this provider.
         config.protocol_namespace = format!("managed.{}", provider.id);
-        Ok(Arc::new(ChatModel::new(config)?))
+        create_model(config)
     }
 
     fn persist(&self, doc: &Document) -> Result<()> {
@@ -329,9 +349,21 @@ impl ModelManager {
     }
 
     pub fn upsert(&self, input: UpsertProvider) -> Result<SettingsView> {
-        let base = normalize_base(&input.api_base, self.inner.allow_http_loopback)?;
+        let base = normalize_base(&input.api_base, input.protocol, self.inner.allow_http_loopback)?;
         self.update(input.revision, |doc| {
             let previous = doc.providers.iter().find(|p| p.id == input.id);
+            if previous.is_some_and(|p| p.api_key.is_some() && (p.api_base != base || p.protocol != input.protocol))
+                && input.api_key.as_ref().is_none_or(|s| s.trim().is_empty()) && !input.clear_key {
+                return Err(invalid("enter the API key again or explicitly clear it when changing endpoint or protocol"));
+            }
+            if input.protocol == Protocol::ChatCompletions && input.generation.as_ref().is_some_and(|v| !v.is_empty()) {
+                return Err(invalid("native generation options cannot be used with Chat Completions"));
+            }
+            let extra_body = if input.protocol == Protocol::ChatCompletions {
+                previous.filter(|p| p.protocol == input.protocol).map(|p| p.extra_body.clone()).unwrap_or_default()
+            } else {
+                input.generation.unwrap_or_else(|| previous.filter(|p| p.protocol == input.protocol).map(|p| p.extra_body.clone()).unwrap_or_default())
+            };
             let key = merge_key(
                 input.api_key,
                 input.clear_key,
@@ -339,11 +371,12 @@ impl ModelManager {
             )?;
             let provider = Provider {
                 id: input.id,
+                protocol: input.protocol,
                 name: input.name.trim().into(),
                 api_base: base,
                 api_key: key,
                 models: input.models,
-                extra_body: previous.map(|p| p.extra_body.clone()).unwrap_or_default(),
+                extra_body,
             };
             if doc.default.is_none() {
                 doc.default = provider
@@ -435,7 +468,7 @@ impl ModelManager {
 
     /// Discovery is read-only, bounded, authenticated and never follows redirects.
     pub async fn discover(&self, input: DiscoverRequest) -> Result<Vec<String>> {
-        let base = normalize_base(&input.api_base, self.inner.allow_http_loopback)?;
+        let base = normalize_base(&input.api_base, input.protocol, self.inner.allow_http_loopback)?;
         let previous = {
             let doc = lock(&self.inner.document);
             match input.provider_id.as_ref() {
@@ -446,7 +479,7 @@ impl ModelManager {
                         .find(|p| &p.id == id)
                         .ok_or_else(|| invalid("provider not found"))?;
                     // A saved key must never be forwarded to a newly typed endpoint without re-entry.
-                    if p.api_base != base
+                    if (p.api_base != base || p.protocol != input.protocol)
                         && input.api_key.as_ref().is_none_or(|s| s.trim().is_empty())
                         && !input.clear_key
                     {
@@ -466,7 +499,10 @@ impl ModelManager {
             .build()
             .map_err(|_| invalid("cannot initialize discovery client"))?;
         let mut request = client.get(format!("{base}/models"));
-        if let Some(key) = key {
+        if input.protocol == Protocol::Messages {
+            request = request.header("anthropic-version", "2023-06-01").query(&[("limit", "256")]);
+            if let Some(key) = key { request = request.header("x-api-key", key); }
+        } else if let Some(key) = key {
             request = request.bearer_auth(key);
         }
         let mut response = request
@@ -492,7 +528,7 @@ impl ModelManager {
         let data = value
             .get("data")
             .and_then(|v| v.as_array())
-            .ok_or_else(|| invalid("model discovery requires an OpenAI-compatible data array"))?;
+            .ok_or_else(|| invalid("model discovery requires a data array; enter model IDs manually if this endpoint has no catalog"))?;
         let mut models = BTreeSet::new();
         for item in data {
             if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
@@ -559,6 +595,8 @@ fn view(doc: &Document) -> SettingsView {
                 id: p.id.clone(),
                 name: p.name.clone(),
                 api_base: p.api_base.clone(),
+                protocol: p.protocol,
+                generation: if p.protocol == Protocol::ChatCompletions { Default::default() } else { p.extra_body.clone() },
                 has_key: p.api_key.is_some(),
                 builtin: false,
                 models: p.models.clone(),
@@ -592,7 +630,7 @@ fn merge_key(
     Ok(key)
 }
 
-fn normalize_base(raw: &str, allow_http_loopback: bool) -> Result<String> {
+fn normalize_base(raw: &str, protocol: Protocol, allow_http_loopback: bool) -> Result<String> {
     if raw.len() > 2048 {
         return Err(invalid("API base is too long"));
     }
@@ -610,7 +648,12 @@ fn normalize_base(raw: &str, allow_http_loopback: bool) -> Result<String> {
         return Err(invalid("use HTTPS API base without credentials/query/fragment; loopback HTTP requires host opt-in"));
     }
     let path = url.path().trim_end_matches('/').to_owned();
-    url.set_path(path.strip_suffix("/chat/completions").unwrap_or(&path));
+    for candidate in [Protocol::ChatCompletions, Protocol::Responses, Protocol::Messages] {
+        if path.ends_with(candidate.suffix()) && candidate != protocol {
+            return Err(invalid("endpoint suffix does not match the selected protocol"));
+        }
+    }
+    url.set_path(path.strip_suffix(protocol.suffix()).unwrap_or(&path));
     Ok(url.to_string().trim_end_matches('/').to_owned())
 }
 
@@ -712,6 +755,8 @@ mod tests {
         UpsertProvider {
             revision,
             id: id.into(),
+            protocol: Protocol::ChatCompletions,
+            generation: None,
             name: id.into(),
             api_base: "https://example.com/v1".into(),
             api_key: Some("test-key-not-a-real-secret".into()),
@@ -720,11 +765,13 @@ mod tests {
                 ModelEntry {
                     id: "first".into(),
                     enabled: true,
+                    capabilities: ModelCapabilities::default(),
                     context_window_tokens: None,
                 },
                 ModelEntry {
                     id: "second".into(),
                     enabled: true,
+                    capabilities: ModelCapabilities::default(),
                     context_window_tokens: None,
                 },
             ],
@@ -735,8 +782,9 @@ mod tests {
     fn model_windows_are_persisted_route_bound_and_frozen_for_active_runs() {
         let store = Arc::new(Store::default());
         let manager = ModelManager::open(store.clone(), false).unwrap();
-        let legacy: ModelEntry = serde_json::from_str(r#"{"id":"legacy","enabled":true}"#).unwrap();
-        assert_eq!(legacy.context_window_tokens, None);
+        let unknown: ModelEntry = serde_json::from_str(r#"{"id":"unknown-capacity","enabled":true}"#).unwrap();
+        assert_eq!(unknown.context_window_tokens, None);
+        assert_eq!(unknown.capabilities, ModelCapabilities::default());
         let mut first = input(0, "one"); first.models[0].context_window_tokens = Some(8192);
         first.models[1].context_window_tokens = Some(32768);
         manager.upsert(first).unwrap();

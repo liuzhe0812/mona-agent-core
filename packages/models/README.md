@@ -1,10 +1,9 @@
 # Optional model management
 
 This crate provides provider configuration, a model catalog, visibility preferences,
-default selection, bounded OpenAI-compatible model discovery, and a model router.
-It depends on the public Agent API and the existing Chat provider; it does not depend
-on Core, Application, HTTP Bridge, or Tauri. The only supported execution protocol
-in this first version is OpenAI-compatible Chat Completions.
+default selection, bounded protocol-aware model discovery, and a model router.
+It depends on the public Agent API and Providers, not Runtime, Application, HTTP Bridge or Tauri.
+Supported protocols are `chat_completions`, `responses`, and `messages`; selection is explicit, not inferred from a model/brand name.
 
 ## Host assembly
 
@@ -43,11 +42,30 @@ or falls back to another model automatically. The current session extension runs
 check before saving a new turn. A configuration race after that preflight can still
 produce a saved failed input, but cannot send incompatible history to the new model.
 
+## Protocol and model facts
+
+Upsert/discovery require `protocol`. Each provider uses an API base plus the selected
+protocol resource path; a full matching endpoint is normalized once, while a mismatched
+protocol suffix is rejected. Custom HTTPS bases are supported; loopback HTTP requires host opt-in.
+The same `providers::create_model` factory powers managed and fixed-model hosts.
+
+Model entries include optional `capabilities` (tools, images, sampling fields, stop and
+maximum output). Unknown facts remain unknown; discovery returns only IDs and never replaces
+configured facts. Native `generation` accepts the whitelisted reasoning/thinking options
+specified in [Providers](../providers/README.md); omitting it preserves the current profile,
+an empty object explicitly clears it. Arbitrary Chat deployment options are not exposed to the UI.
+Protocol, capabilities, window and generation profile are captured with the Run binding.
+
+Only settings document version 2 is read. Missing/unknown protocol and obsolete formats are
+rejected, not migrated or silently reset. Changing a saved endpoint/protocol requires re-entering
+its API key or explicitly clearing it; a stored credential is never implicitly sent to a new route.
+Discovery uses Bearer for Chat/Responses and x-api-key plus anthropic-version for Messages,
+requests at most 256 IDs, and does not claim all catalog pages have been retrieved.
+
 ## Model context capacity
 
 `ModelEntry.context_window_tokens: Option<u64>` is a trusted per-provider/per-model
-capacity (1..1,000,000,000). `None` remains unknown. Old JSON records deserialize with
-None; Rust struct literals must explicitly add the new optional field. Model discovery
+capacity (1..1,000,000,000). `None` remains unknown. Model discovery
 returns IDs, not guessed capacities. The formal UI supports setting/clearing the value
 and preserves it when refreshing IDs or toggling visibility.
 
@@ -76,7 +94,7 @@ worker, as the server example does.
 
 Public views contain only `has_key`, never stored credentials. Omitted/blank API keys
 retain an existing value; `clear_key` explicitly removes it. Stored credentials are
-not sent to a different discovery endpoint unless the caller re-enters the key.
+not reused across endpoint/protocol changes without re-entry or explicit clearing.
 Discovery never follows redirects, times out after 15 seconds, caps responses at
 1 MiB and returns at most 256 model IDs. HTTPS endpoints are allowed; loopback HTTP
 requires trusted host opt-in. Production hosts own network egress restrictions,
@@ -104,7 +122,7 @@ multi-user product must apply its own admin authorization and per-domain manager
 
 An empty first startup is valid. When both `AGENT_MODEL_ENDPOINT` and
 `AGENT_MODEL_NAME` exist, the host imports them with optional `AGENT_MODEL_KEY` and
-`AGENT_MODEL_EXTRA_JSON`; subsequent starts use the saved document. Production hosts
+`AGENT_MODEL_EXTRA_JSON` and `AGENT_MODEL_PROTOCOL` (new host default: chat_completions); subsequent starts use the saved document. Production hosts
 set `AGENT_MODEL_STORE_KEY` to a stable random secret of at least 16 characters.
 
 `AGENT_MODEL_SETTINGS_PATH` overrides the encrypted file path. Otherwise it lives at

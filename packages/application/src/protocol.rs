@@ -20,6 +20,7 @@ impl From<AgentError> for ApplicationError {
         let (code, message) = match error.code {
             ErrorCode::ModelHistoryIncompatible => (ApplicationErrorCode::InvalidRequest,
                 "当前会话包含原模型专属历史，不能直接使用所选模型。请新建会话；原会话未被转换，也不会自动重新执行。"),
+            ErrorCode::Unsupported => (ApplicationErrorCode::InvalidRequest, UNSUPPORTED_CAPABILITY_MESSAGE),
             ErrorCode::Limit => (ApplicationErrorCode::Capacity, "runtime limit reached"),
             ErrorCode::Closed | ErrorCode::Cancelled => (ApplicationErrorCode::Closed, "run is no longer accepting this operation"),
             ErrorCode::Deadline => (ApplicationErrorCode::Closed, "operation deadline reached"),
@@ -75,9 +76,13 @@ pub(crate) fn validate_key(key: &str) -> ApplicationResult<()> {
     }
     Ok(())
 }
+const UNSUPPORTED_CAPABILITY_MESSAGE: &str = "当前模型协议或配置不支持本次请求中的能力或参数，请检查模型设置。";
+
 pub(crate) fn public_outcome(outcome: &mut RunOutcome) {
     if let Some(error) = &mut outcome.error {
-        error.message = "run stopped; inspect trusted host diagnostics for details".to_owned();
+        error.message = if error.code == ErrorCode::Unsupported {
+            UNSUPPORTED_CAPABILITY_MESSAGE
+        } else { "run stopped; inspect trusted host diagnostics for details" }.to_owned();
     }
 }
 pub(crate) fn public_snapshot(mut snapshot: RunSnapshot) -> RunSnapshot {
@@ -87,4 +92,21 @@ pub(crate) fn public_snapshot(mut snapshot: RunSnapshot) -> RunSnapshot {
 pub(crate) fn public_event(mut event: EventEnvelope) -> EventEnvelope {
     if let api::RunEvent::RunFinished { outcome } = &mut event.event { public_outcome(outcome); }
     event
+}
+
+#[cfg(test)]
+mod capability_errors {
+    use super::*;
+    #[test]
+    fn unsupported_capability_is_actionable_without_exposing_provider_details() {
+        let failure = AgentError::new(ErrorCode::Unsupported, "PRIVATE_PROVIDER_TOKEN");
+        let mapped = ApplicationError::from(failure.clone());
+        assert_eq!(mapped.code, ApplicationErrorCode::InvalidRequest);
+        assert!(mapped.message.contains("模型设置"));
+        let mut outcome = RunOutcome { status: api::RunStatus::Failed, output: None, error: Some(failure),
+            task_usage: api::TaskUsage { model_calls: 1, reported_tokens: 0, usage_complete: false }, steps: 1 };
+        public_outcome(&mut outcome);
+        assert_eq!(outcome.error.unwrap().message, mapped.message);
+        assert!(!mapped.message.contains("PRIVATE_PROVIDER_TOKEN"));
+    }
 }

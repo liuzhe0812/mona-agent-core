@@ -1,6 +1,6 @@
 # 可选模型管理与 Web 设置
 
-模型管理以 `packages/models` 单独交付，提供供应商增删改、模型目录、显示开关、默认模型、OpenAI 兼容模型发现与加密配置存储。当前仅支持 Chat Completions；没有加入计费、图片/视频默认模型或供应商原生协议集合。
+模型管理由 `packages/models` 交付，支持 Chat Completions、OpenAI Responses、Anthropic Messages，以及自定义 API Base、API Key、模型目录、默认选择和加密配置。未加入 OAuth、供应商托管工具、远程会话、计费或音视频生成。
 
 ## 装配与边界
 
@@ -18,6 +18,14 @@ Web UI 连接后单独读取管理接口；没有安装该能力时显示不可�
 
 Tauri 宿主可以直接复用管理对象实现自己的管理命令；本次没有修改通用 Tauri Bridge 或添加原生命令。
 
+## 协议、能力与推理设置
+
+添加供应商时明确选择协议；详情头显示实际协议。API Base 会拼接对应 /chat/completions、/responses 或 /messages；完整且匹配的资源路径会规范化，错配路径明确拒绝，不探测或自动回退协议。Messages 使用 x-api-key 和版本头；另外两种使用 Bearer。
+
+模型设置保留窗口，并提供工具、图片、采样和停止序列的支持/不支持/未知三态，以及可选最大输出。发现模型只补 ID，不覆盖已配置事实。原生协议的可选推理 JSON 受白名单限制：Responses reasoning；Messages thinking/output_config。空对象明确清空，其他字段拒绝；不允许把托管工具或远程会话混进参数。
+
+当前模型设置仅支持格式 2，废弃格式不迁移。修改端点或协议时，需重新填写密钥或明确清除，防止旧凭据被发给新地址；普通编辑可留空保留密钥。执行中的任务仍固定使用启动时的协议和配置。
+
 ## 长会话中切换模型
 
 普通历史可继续交给新模型。含模型专属回传字段的历史，必须匹配实际模型、端点、供应商命名空间及私有配置。新轮次保存前检查一次，启动绑定后再检查一次；不兼容时显示“当前会话包含原模型专属历史，不能直接使用所选模型。请新建会话”，不自动新建、不静默删除字段、不回退原模型。普通预检拒绝不增加轮次或修改原会话；设置恰在接纳和启动之间变化时，已接纳输入可能保存为失败，但没有模型/摘要/工具执行。
@@ -28,7 +36,7 @@ Tauri 宿主可以直接复用管理对象实现自己的管理命令；本次�
 
 每个 `ModelEntry` 可保存 `context_window_tokens`（可选，1–1,000,000,000 整数）。模型列表的窗口按钮及新增模型弹窗提供设置入口；留空表示未知，不依据同名模型或供应商猜测。通用模型发现只返回 ID，刷新列表和切换可见性保留既有窗口。
 
-模型绑定会固定对应窗口，修改只影响新 Run。旧 JSON 无该字段时按 None 读取；首次环境导入可读取 `AGENT_MODEL_CONTEXT_TOKENS`，不覆盖已保存设置。运行时按实际绑定模型预留输出并近似判断压力，字节保护仍独立生效，详见[上下文管理](CONTEXT-MANAGEMENT.zh-CN.md)。
+模型绑定会固定对应窗口，修改只影响新 Run。未知容量保持 None；首次环境导入可读取 `AGENT_MODEL_CONTEXT_TOKENS`，不覆盖已保存设置。运行时按实际绑定模型预留输出并近似判断压力，字节保护仍独立生效，详见[上下文管理](CONTEXT-MANAGEMENT.zh-CN.md)。
 
 ## 配置保存
 
@@ -39,6 +47,7 @@ Tauri 宿主可以直接复用管理对象实现自己的管理命令；本次�
 | `AGENT_MODEL_STORE_KEY` | 生产宿主可注入的稳定随机加密密钥；开发启动器未提供时自动生成 |
 | `AGENT_MODEL_SETTINGS_PATH` | 加密配置文件的显式路径 |
 | `AGENT_MODEL_MANAGEMENT=0` | 不安装模型管理插件 |
+| `AGENT_MODEL_PROTOCOL` | 环境引导/固定模型的协议：chat_completions（新环境默认）、responses 或 messages |
 | `AGENT_ALLOW_HTTP_LOOPBACK=1` | 允许接入本机 HTTP 模型端点 |
 
 Windows 默认路径为 `%LOCALAPPDATA%/mona-agent-core/model-settings.enc`；Unix 使用 `XDG_STATE_HOME` 或 `$HOME/.local/state` 下的同名目录。`npm run dev:web` 在同一状态目录生成 `model-store.key` 并复用，用户无需手工管理。生产宿主仍应从自己的密钥系统注入稳定主密钥；本模块不实现 OS 密钥链或密钥轮换。

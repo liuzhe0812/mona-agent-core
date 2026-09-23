@@ -1,6 +1,6 @@
 use api::*;
 use application::{AgentApplication, ApplicationConfig};
-use providers::{ChatConfig, ChatModel};
+use providers::{create_model, Protocol, ProviderConfig};
 use runtime::HostBuilder;
 use std::{sync::Arc, time::Duration};
 
@@ -134,7 +134,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             eprintln!("OFFLINE DEMO: deterministic model; no paid API requests");
             Arc::new(DemoModel)
         } else {
-            let mut config = ChatConfig::new(
+            let protocol = Protocol::parse(&std::env::var("AGENT_MODEL_PROTOCOL").unwrap_or_else(|_| "chat_completions".into()))?;
+            let mut config = ProviderConfig::new(
+                protocol,
                 std::env::var("AGENT_MODEL_ENDPOINT")?,
                 std::env::var("AGENT_MODEL_NAME")?,
             );
@@ -161,7 +163,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     )
                 })?;
             }
-            Arc::new(ChatModel::new(config)?)
+            create_model(config)?
         };
         builder = builder.model(model);
     }
