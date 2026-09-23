@@ -69,7 +69,7 @@ impl WorkspaceSettings {
             .or_else(|| std::env::var_os("HOME"))
             .map(PathBuf::from)
             .ok_or_else(|| error("invalid_request", "请指定默认工作目录。"))?;
-        let initial = home.join("Mona/workspaces");
+        let initial = home.join(".mona-agent/workspaces");
         let mut private = vec![
             fs::canonicalize(&state).map_err(io)?,
             session_base(demo)?,

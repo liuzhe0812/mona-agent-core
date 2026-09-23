@@ -72,7 +72,7 @@ Node 启动器只负责编排本地进程和开发配置，不执行 Agent 循�
 | `AGENT_SPILL` | 按能力配置，默认启用 | 设为 `0` 时将长结果归档锁定为关闭 |
 | `AGENT_SPILL_DIR` | 用户状态目录 | 覆盖长结果私有归档目录 |
 | `AGENT_SESSIONS_DIR` | 用户状态目录下的 `sessions` | 覆盖宿主权限域的会话状态目录；格式 3 在每会话头保存 cwd，不再按默认 cwd 哈希分目录 |
-| `AGENT_WORKSPACE_DIR` | 用户目录下 `Mona/workspaces` | 部署指定默认工作根并锁定设置；没有覆盖时可由 Web 修改，普通会话各分配子目录 |
+| `AGENT_WORKSPACE_DIR` | 用户主目录下 `~/.mona-agent/workspaces` | 部署指定默认工作根并锁定设置；没有覆盖时可由 Web 修改，普通会话各分配子目录 |
 | `AGENT_PROJECTS` | 默认启用（需编译 projects feature） | 设为 `0` 不装配项目管理，基础工作目录和文件栏保持可用 |
 
 Windows 默认状态目录为 `%LOCALAPPDATA%/mona-agent-core`；Unix 默认使用 `XDG_STATE_HOME/mona-agent-core` 或 `$HOME/.local/state/mona-agent-core`。

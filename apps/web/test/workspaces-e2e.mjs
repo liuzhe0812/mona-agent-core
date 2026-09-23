@@ -100,7 +100,7 @@ try {
   ui=await startUiServer({host:'127.0.0.1',port:0,endpoint,token});const origin=`http://127.0.0.1:${ui.address().port}`;
   await startHost(origin);
   const initial=await request('/api/workspace-settings');
-  check('fresh host has a configurable dedicated default root, not the executable cwd',normalizePath(initial.default_root).endsWith('/home/mona/workspaces')&&!initial.locked);
+  check('fresh host has a configurable dedicated default root, not the executable cwd',normalizePath(initial.default_root).endsWith('/home/.mona-agent/workspaces')&&!initial.locked);
   check('project availability reflects the host build/deployment',initial.projects_enabled===!noProjects);
   if(noProjects){
     const unavailable=await fetch(endpoint+'/api/projects',{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(5000)});
