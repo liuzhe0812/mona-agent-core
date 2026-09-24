@@ -112,6 +112,20 @@
   --ui-provider-sidebar-width: 240px;
   --ui-files-width: 340px;
   --ui-files-overlay-width: 420px;
+  --ui-right-pane-default-width: 420px;
+  --ui-right-pane-min-width: 320px;
+  --ui-right-pane-max-width: 720px;
+  --ui-right-tab-width: 156px;
+  --ui-right-tab-min-width: 60px;
+  --ui-right-tab-height: 28px;
+  --ui-right-tab-mobile-width: 150px;
+  --ui-turn-nav-width: 48px;
+  --ui-turn-nav-track-width: 36px;
+  --ui-turn-nav-slot-height: 10px;
+  --ui-turn-nav-mark-width: 12px;
+  --ui-turn-nav-preview-width: 320px;
+  --ui-turn-nav-edge-clearance: 96px;
+  --ui-line-preview: 20px;
   --ui-provider-logo-size: var(--ui-control-md);
   --ui-switch-width: 40px;
   --ui-switch-height: 24px;
@@ -153,6 +167,7 @@
   --motion-enter-ui: var(--motion-enter);
   --motion-exit-ui: var(--motion-exit);
   --motion-shimmer-cycle: 1800ms;
+  --ui-shadow-hover-card: 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%);
 
   /* Theme-controlled shape fallbacks. */
   --skin-composer-radius: var(--ui-radius-container);

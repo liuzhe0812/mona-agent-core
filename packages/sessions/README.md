@@ -32,13 +32,26 @@
 
 `admission_bytes` 包含返回历史与新 prompt，不包含宿主尚未插入的系统消息；宿主应先预留系统消息，并取初始历史及累计历史限额的较小值。容量不足在保存新轮次前返回错误，旧摘要和档案保持不变。
 
-仅支持当前格式 3，没有旧格式读取、自动迁移或旧字段兼容。会话文件直接位于宿主指定 base 下，实际 cwd 保存在每个会话头；旧哈希分组目录明确拒绝而不改动。默认根和普通会话目录分配属于宿主，见[工作区方案](../../docs/WORKSPACES.zh-CN.md)。未知格式、损坏和不一致数据明确拒绝，不重置为空会话。保存采用同目录临时文件、sync、原子替换；重启将运行中轮次标为中断。未派发工具为 Skipped，已有 intent 但结果未知为 Unknown；不猜测回滚，不自动重跑。
+仅支持当前格式 3，没有旧格式读取、迁移、探测或旧字段兼容。会话文件直接位于宿主指定 base 下，实际 cwd 保存在每个会话头；Store 只扫描当前目录下的 `*.jsonl` 文件，其他目录不属于当前会话格式。默认根和普通会话目录分配属于宿主，见[产品层与 Web 装配](../../docs/architecture/WEB.zh-CN.md)。当前格式文件损坏或不一致时明确拒绝，不重置为空会话。保存采用同目录临时文件、sync、原子替换；重启将运行中轮次标为中断。未派发工具为 Skipped，已有 intent 但结果未知为 Unknown；不猜测回滚，不自动重跑。
+
+## 可选历史检索
+
+启用 `sessions/search` 后，`HistorySearch::open(store)` 在同一私有目录建立 `history-index.sqlite3` 派生索引；不替换可靠会话正本，也不在关键检查点里追加另一份持久化事务。查询时按当前档案 revision/文件状态增量刷新，完成的索引可跨查询和重启复用，丢弃索引后可从原文重建。索引损坏或刷新失败明确报错，不返回假空结果。捕获原文快照时短暂持有会话锁，分词和 SQLite 操作不持锁，不让索引工作长期占用可靠提交关口；返回前核对来源版本，期间变化则明确重试。
+
+`search(scope, SearchRequest, cancel)` 使用安全构造的 FTS5 词项表达式；中文采用字/双字词项，英文/标识符使用词项，无语义模型或第二次摘要调用。默认 8 条、最多 20 条结果；读取原文每页最多 8 KiB。SQLite 和刷新操作受取消与约 10 秒总期限限制，持锁等待也计时。索引上限约 256 MiB；大规模首次构建有成本，不承诺毫秒检索。
+
+结果提供 session/turn/message 位置、revision、内容指纹和有界摘录；`read(scope, ReadRequest, cancel)` 再读会话正本，返回原文页和相邻消息定位。仅追加历史、检查点或重命名不使未改变的原文失效；指纹/身份不匹配则拒绝。只检索用户正文、助手可见文本及工具文本/状态，排除 System、隐藏推理、ProviderData、Base64、structured 和 UI 缓存；压缩前原文来自 `Document::history()`，不是模型摘要。
+
+`search::tools(search, ScopeResolver)` 返回只读 `session_search` / `session_read`，复用既有 Tool 接口。Scope 由可信宿主解析，不是模型参数；查询中的 session_id 只能缩小范围。Web 默认普通会话工具只检索普通会话，项目会话只检索同项目；临时子会话继承父会话的历史读取范围，但不获得写入父会话的身份。工作目录相同不代表获准读取另一个项目；管理 API 属于本机单用户权限域，可由用户主动查看全部历史。删除后不再返回该会话，归档不等于删除。索引是私有用户数据；删除不等于磁盘安全擦除或已发送内容撤回。
+
+该功能不依赖 Memory。关闭 search feature 不链接 SQLite，不影响会话保存、恢复及压缩。见[上下文与三类记忆](../../docs/architecture/CONTEXT-MEMORY.zh-CN.md)。
 
 ## 边界与验证
 
-本地文件未加密；权限域与磁盘保护由宿主负责。每宿主状态目录最多 1000 个会话，每会话最多 512 轮、文件 32 MiB；完整快照有随历史增长的 I/O 成本。本包不是永久附件库、分布式存储、事务回滚或跨设备同步系统。Web 接口和分页展示见 [本地会话](../../docs/LOCAL-SESSIONS.zh-CN.md)。
+本地文件未加密；权限域与磁盘保护由宿主负责。每宿主状态目录最多 1000 个会话，每会话最多 512 轮、文件 32 MiB；完整快照有随历史增长的 I/O 成本。本包不是永久附件库、分布式存储、事务回滚或跨设备同步系统。Web 接口和分页展示见 [会话接纳与产品接口](../../docs/architecture/WEB.zh-CN.md)。
 
 ```sh
 cargo test -p sessions --no-default-features
 cargo test -p sessions --features compaction
+cargo test -p sessions --features search --test search
 ```

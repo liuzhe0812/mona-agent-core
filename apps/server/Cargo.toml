@@ -6,12 +6,14 @@ license.workspace = true
 publish = false
 
 [features]
-default = ["model-management", "skills", "compaction", "spill", "projects"]
+default = ["model-management", "skills", "compaction", "spill", "projects", "memory", "history-search"]
 model-management = ["dep:models"]
 skills = ["dep:skills"]
 compaction = ["dep:compaction", "sessions/compaction"]
 spill = ["dep:spill"]
 projects = ["dep:projects"]
+memory = ["dep:memory"]
+history-search = ["sessions/search"]
 
 [dependencies]
 api.workspace = true
@@ -21,6 +23,7 @@ http-bridge.workspace = true
 providers.workspace = true
 tools.workspace = true
 sessions.workspace = true
+memory = { workspace = true, optional = true }
 instructions.workspace = true
 workspace = { path = "../../packages/workspace" }
 projects = { path = "../../packages/projects", optional = true }
@@ -38,6 +41,8 @@ tower-http = { version = "0.6", features = ["cors"] }
 toml = "0.8"
 tempfile = "3"
 sha2 = "0.10"
+portable-pty = "=0.9.0"
+base64 = "0.22"
 
 [dev-dependencies]
 reqwest.workspace = true

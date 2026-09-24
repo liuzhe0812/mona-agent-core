@@ -1,0 +1,9 @@
+/* Isolated third-party document surface. Original document colors are not Mona chrome. */
+html,body,#document{height:100%;margin:0;min-width:0;box-sizing:border-box;font:13px/1.5 system-ui,sans-serif;overflow:auto}
+body{background:#f4f4f4;color:#222}
+#document>.docx-wrapper{padding:12px;background:transparent}
+.docx-wrapper>section.docx{zoom:var(--document-scale,1);box-shadow:none}
+.sheet-tabs{display:flex;gap:4px;padding:6px;overflow:auto}
+.sheet-tabs button{border:0;padding:4px 10px;border-radius:6px;background:transparent;font:inherit;color:inherit;white-space:nowrap}
+.sheet-tabs button[aria-selected=true]{background:#e7e7e7}
+[role=alert]{padding:12px;color:#a22}

@@ -24,6 +24,9 @@ const SKILLS: &str = "skills";
 pub const COMPACTION: &str = "compaction";
 pub const SPILL: &str = "spill";
 pub const INSTRUCTIONS: &str = "instructions";
+pub const MEMORY: &str = "memory";
+pub const MEMORY_UPDATE: &str = "memory_update";
+pub const HISTORY_SEARCH: &str = "history-search";
 pub const GREP: &str = "grep";
 pub const FIND: &str = "find";
 pub const LS: &str = "ls";
@@ -75,6 +78,9 @@ impl Default for DeploymentFile {
                 user_configurable: true,
             },
         );
+        for (id, enabled) in [(MEMORY, cfg!(feature = "memory")), (HISTORY_SEARCH, cfg!(feature = "history-search")), (MEMORY_UPDATE, false)] {
+            capabilities.insert(id.into(), CapabilityPolicy { enabled, user_configurable: true });
+        }
         for id in FIXED_TOOLS {
             capabilities.insert(
                 id.into(),
@@ -167,6 +173,9 @@ impl CapabilityManager {
                     | COMPACTION
                     | SPILL
                     | INSTRUCTIONS
+                    | MEMORY
+                    | MEMORY_UPDATE
+                    | HISTORY_SEARCH
                     | "read"
                     | "shell"
                     | "edit"
@@ -328,6 +337,8 @@ fn compiled(id: &str) -> bool {
         SKILLS => cfg!(feature = "skills"),
         COMPACTION => cfg!(feature = "compaction"),
         SPILL => cfg!(feature = "spill"),
+        MEMORY | MEMORY_UPDATE => cfg!(feature = "memory"),
+        HISTORY_SEARCH => cfg!(feature = "history-search"),
         "read" | "shell" | "edit" | "write" | GREP | FIND | LS | INSTRUCTIONS => true,
         _ => false,
     }
@@ -348,6 +359,9 @@ struct Metadata {
 
 fn manageable_metadata() -> Vec<Metadata> {
     vec![
+        Metadata { id: MEMORY, name: "长期记忆", description: "按授权范围注入少量精选长期事实；关闭不删除已保存记忆。", kind: CapabilityKind::Component },
+        Metadata { id: HISTORY_SEARCH, name: "历史会话检索", description: "按需搜索和读取已保存原文，不影响会话保存与恢复。", kind: CapabilityKind::Component },
+        Metadata { id: MEMORY_UPDATE, name: "Agent 更新记忆", description: "授权 Agent 新增、纠正或删除长期记忆，不逐次确认；需要启用长期记忆组件。", kind: CapabilityKind::Tool },
         Metadata {
             id: INSTRUCTIONS,
             name: "项目规则",
@@ -738,8 +752,11 @@ mod tests {
         assert!(view.components.iter().any(|item| item.id == INSTRUCTIONS));
         assert_eq!(
             view.tools.iter().map(|item| item.id).collect::<Vec<_>>(),
-            vec![GREP, FIND, LS]
+            if compiled(MEMORY_UPDATE) { vec![MEMORY_UPDATE, GREP, FIND, LS] } else { vec![GREP, FIND, LS] }
         );
+        assert_eq!(manager.active(MEMORY), compiled(MEMORY));
+        assert_eq!(manager.active(HISTORY_SEARCH), compiled(HISTORY_SEARCH));
+        assert!(!manager.active(MEMORY_UPDATE));
         for hidden in [MODEL_MANAGEMENT, "read", "shell", "edit", "write"] {
             assert!(view
                 .components

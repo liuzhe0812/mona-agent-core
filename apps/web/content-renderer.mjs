@@ -251,7 +251,7 @@ async function copyText(value, button) {
   }
 }
 
-function codeBlock(code, language = '') {
+export function codeBlock(code, language = '') {
   const normalized = normalizeLanguage(language);
   const block = el('div', 'message-code-block');
   const head = el('div', 'message-code-head');

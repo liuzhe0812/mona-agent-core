@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "dependencies": {
+    "docx-preview": "0.4.0",
+    "jszip": "3.10.1",
+    "@aiden0z/pptx-renderer": "1.2.4",
+    "@extend-ai/react-xlsx": "0.16.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "esbuild": "0.25.12"
+  }
+}

@@ -213,6 +213,11 @@ impl AgentApplication {
         if let Some(error) = &data.fault { return Err(error.clone()); }
         Ok(ResultResponse { run_id: id.to_owned(), outcome: data.snapshot.outcome.clone() })
     }
+    /// Trusted host-only terminal report. Bridges intentionally expose the safe result/snapshot instead.
+    pub async fn wait_report(&self, id: &str) -> ApplicationResult<Arc<api::RunReport>> {
+        let entry = self.entry(id)?;
+        entry.session.wait().await.map_err(ApplicationError::from)
+    }
     pub fn subscribe_events(&self, id: &str, after: Option<u64>) -> ApplicationResult<Subscription> {
         let entry = self.entry(id)?;
         let permit = self.inner.subscriptions.clone().try_acquire_owned()

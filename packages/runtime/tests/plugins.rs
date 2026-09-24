@@ -1,7 +1,7 @@
 mod support;
 use api::*;
 use runtime::HostBuilder;
-use memory::{InMemoryStore, MemoryBackend, MemoryPlugin};
+use memory::{InMemoryStore, Backend, Binding, Change, Operation, Origin, MemoryPlugin};
 use planner::{PlanRequest, Planner, PlannerPlugin, PLANNER_SERVICE};
 use std::{sync::{Arc, Mutex}, time::Duration};
 use support::*;
@@ -114,25 +114,28 @@ async fn the_model_can_be_supplied_as_a_plugin_service() {
 #[tokio::test]
 async fn memory_is_a_projection_and_not_a_transcript_rewrite() {
     let store = Arc::new(InMemoryStore::default());
-    store.remember("language".into(), "Chinese".into()).await.unwrap();
+    let cancel = CancellationToken::new();
+    store.apply(&Change { revision: store.read(&cancel).unwrap().revision, operations: vec![Operation::Add { text: "Chinese".into() }] }, Origin::host(), &cancel).unwrap();
     let mut host = HostBuilder::new().model(ScriptModel::new(vec![answer("ok")]))
-        .plugin(Arc::new(MemoryPlugin::new(store))).build().await.unwrap();
+        .plugin(Arc::new(MemoryPlugin::new(vec![Binding::new("personal", store, false)]).unwrap())).build().await.unwrap();
     let report = host.engine().execute(RunRequest::new("language preference?")).await.unwrap();
     assert_eq!(report.transcript.len(), 2);
     assert_eq!(report.model_requests[0].request.as_ref().unwrap().messages.len(), 2);
     assert!(report.model_requests[0].request.as_ref().unwrap().messages[0].text().contains("Chinese"));
-    assert!(!report.transcript.iter().any(|m| m.text().contains("Retrieved reference")));
+    assert!(!report.transcript.iter().any(|m| m.text().contains("Curated long-term")));
     host.shutdown().await.unwrap();
 }
 
 #[tokio::test]
 async fn memory_write_tool_is_denied_by_default() {
     let store = Arc::new(InMemoryStore::default());
-    let model = ScriptModel::new(vec![calls(&[("remember", "memory_remember", serde_json::json!({"key":"k","value":"v"}))]), answer("denied")]);
-    let mut host = HostBuilder::new().model(model).plugin(Arc::new(MemoryPlugin::new(store.clone()))).build().await.unwrap();
+    let cancel = CancellationToken::new();
+    let revision = store.read(&cancel).unwrap().revision;
+    let model = ScriptModel::new(vec![calls(&[("remember", "memory_update", serde_json::json!({"scope":"personal","revision":revision,"operations":[{"action":"add","text":"fact"}]}))]), answer("denied")]);
+    let mut host = HostBuilder::new().model(model).plugin(Arc::new(MemoryPlugin::new(vec![Binding::new("personal", store.clone(), true)]).unwrap())).build().await.unwrap();
     let report = host.engine().execute(RunRequest::new("remember")).await.unwrap();
     assert_eq!(results(&report)[0].status, ToolStatus::Denied);
-    assert!(store.recall("k", 4).await.unwrap().is_empty());
+    assert!(store.read(&cancel).unwrap().entries.is_empty());
     host.shutdown().await.unwrap();
 }
 

@@ -4,9 +4,12 @@ use std::time::Duration;
 
 mod capabilities;
 mod environment;
+#[cfg(any(feature = "memory", feature = "history-search"))]
+mod memory_routes;
 #[cfg(feature = "model-management")]
 mod model_settings;
 mod session_routes;
+mod side_routes;
 #[cfg(feature = "skills")]
 mod skill_setup;
 #[cfg(feature = "spill")]
@@ -14,6 +17,9 @@ mod spill_setup;
 mod tool_setup;
 mod workspace_routes;
 mod workspace_setup;
+mod workbench_routes;
+mod terminal;
+mod review;
 
 /// Deterministic, explicitly labelled offline demonstration. Not a real language model.
 struct DemoModel;
@@ -67,6 +73,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sy
         environments.clone(),
         demo,
     )?;
+    let side = side_routes::Service::new(
+        application.clone(),
+        environments.clone(),
+        workspaces.settings.clone(),
+        session_store.clone(),
+    );
     let mut config = http_bridge::HttpConfig::new(token.clone());
     if let Ok(origin) = std::env::var("AGENT_UI_ORIGIN") {
         config.allowed_origins.push(origin);
@@ -79,11 +91,24 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sy
             token.clone(),
             std::env::var("AGENT_UI_ORIGIN").ok(),
             Some(workspaces.clone()),
+            Some(side.clone()),
         )
         .map_err(|e| AgentError::new(ErrorCode::Configuration, e.to_string()))?,
     );
+    let terminals = std::sync::Arc::new(terminal::Terminals::default());
+    let sweep = terminals.clone();
+    let terminal_sweep = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop { interval.tick().await; sweep.sweep(); }
+    });
+    let router = router.merge(workbench_routes::router(workspaces.clone(), terminals.clone(), token.clone(), std::env::var("AGENT_UI_ORIGIN").ok())?);
     let router = router.merge(workspace_routes::router(
         workspaces,
+        token.clone(),
+        std::env::var("AGENT_UI_ORIGIN").ok(),
+    )?);
+    let router = router.merge(side_routes::router(
+        side,
         token.clone(),
         std::env::var("AGENT_UI_ORIGIN").ok(),
     )?);
@@ -99,6 +124,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sy
             .map_err(|e| AgentError::new(ErrorCode::Configuration, e.to_string()))?,
         )
     };
+    #[cfg(any(feature = "memory", feature = "history-search"))]
+    let router = router.merge(memory_routes::router(&environments.factory, token.clone(), std::env::var("AGENT_UI_ORIGIN").ok())?);
     #[cfg(feature = "spill")]
     let router = if let Some(spill_host) = &environments.factory.spill {
         router.merge(
@@ -136,6 +163,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sy
             let _ = stop_app.shutdown(Duration::from_secs(10)).await;
         })
         .await;
+    terminal_sweep.abort(); terminals.shutdown();
     application.shutdown(Duration::from_secs(10)).await?;
     environments.shutdown().await?;
     serve_result?;

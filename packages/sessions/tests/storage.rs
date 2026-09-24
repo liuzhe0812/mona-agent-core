@@ -285,6 +285,19 @@ fn empty_session_is_durable_and_single_writer_owned() {
 }
 
 #[test]
+fn unrelated_directories_are_not_part_of_the_current_session_format() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = temp.path().join("sessions");
+    std::fs::create_dir_all(base.join("a".repeat(64))).unwrap();
+    std::fs::write(base.join("note.txt"), "ignored").unwrap();
+
+    let store = Store::open(&base, temp.path()).unwrap();
+    assert!(store.list(0, 50, "", false).unwrap().sessions.is_empty());
+    let created = store.create("current").unwrap();
+    assert_eq!(store.header(&created.id).unwrap().id, created.id);
+}
+
+#[test]
 fn pinned_archived_and_unread_flags_are_durable_and_select_the_list_view() {
     let tmp = tempfile::tempdir().unwrap();
     let base = tmp.path().join("data");

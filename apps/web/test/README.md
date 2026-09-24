@@ -107,6 +107,20 @@ node apps/web/test/protocols-e2e.mjs
 
 端点、签名和摘要均为受控测试数据；该流程证明协议接线、保存和隔离，不证明真实供应商签名验证、图片语义或摘要质量。当前限制见 [Providers](../../../packages/providers/README.md)。
 
+## 精选记忆与历史原文
+
+构建 `cargo build -p server --target-dir target/context-validation` 后执行 `node apps/web/test/memory-e2e.mjs`。从独立空目录启动正式宿主，验证页面写入 Markdown、作用域/版本拒绝、模型自动注入、工作区隔离、旧原文搜索和分页、工具授权、实际 Agent 写入、编辑删除刷新以及宿主进程重启。同时验证关闭长期记忆和历史检索后，基础会话仍正常续聊、数据不被删除、管理控件如实不可用。报告默认在 `target/memory-validation/browser/`，可用 `MONA_TEST_REPORT_DIR` 指定；只清理本测试创建的目录和进程，不读取用户配置。
+
+`memory-ui.test.mjs` 专项验证连接切换时旧保存/查询/原文回调不会覆盖新操作或保留旧内容；`memory.test.mjs` 检查请求/流式响应上限与取消。它们是状态单测，不替代真实浏览器布局验收。
+
+受控模型只验证工具/权限/保存/检索接线，不证明自动筛选事实、真实模型记忆效果或语义检索质量。没有后台自进化任务。
+
+## 右侧工作面板
+
+`cargo build -p server --target-dir target/zcode-right-pane` 后运行 `npm run test:web:right-pane`。使用自己的用户/会话/工作目录、随机环回端口、实际 Git 与 PTY，验证多标签关闭/重开/保留 DOM、目录展开、HTML sandbox、DOCX/XLSX/PPTX 真实预览、审查、终端、旁支隔离及窄屏。`workbench-fixtures.mjs` 生成最小原始 OOXML 文件，不需要安装 Office。Office iframe 是独立来源，测试通过其 DevTools target 验证实际渲染内容，不在产品放宽同源权限。
+
+`MONA_TEST_SERVER` 可指定测试构建，`MONA_TEST_REPORT_DIR` 可指定报告位置；默认 `.tmp-verify/right-pane-browser-report`。多格式样例通过不代表 Office 全格式一致性或恶意文件审计，具体限制见[面板说明](../../../docs/ui/RIGHT-PANE.zh-CN.md)。
+
 ## 10. 浏览器与证据边界
 
 浏览器脚本要求 Node 22+。Windows 默认 Edge，其他平台默认 `chromium`，可通过 `BROWSER_BIN` 指定。验证结论必须区分：

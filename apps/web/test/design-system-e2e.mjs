@@ -277,21 +277,32 @@ try {
   })()`));
   await screenshot('conversation-renderer-dark');
   await waitPage("!document.querySelector('#conversation-rail').hidden && document.querySelectorAll('.conversation-rail-mark').length===2", 'conversation rail visible');
-  check('conversation rail renders uniform compact markers with one active reading marker', await evaluate("(() => {const marks=[...document.querySelectorAll('.conversation-rail-mark')], widths=marks.map(mark=>getComputedStyle(mark,'::before').width);return marks.length===2 && document.querySelectorAll('.conversation-rail-mark.is-active').length===1 && widths.every(width=>width==='8px');})()"));
+  check('conversation rail renders 12px compact markers with one active reading marker', await evaluate("(() => {const marks=[...document.querySelectorAll('.conversation-rail-mark')], widths=marks.map(mark=>getComputedStyle(mark,'::before').width);return marks.length===2 && document.querySelectorAll('.conversation-rail-mark.is-active').length===1 && widths.every(width=>width==='12px');})()"));
   const railPoint = await evaluate("(() => {const r=document.querySelector('.conversation-rail-mark:first-child').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()");
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...railPoint });
-  await waitPage("getComputedStyle(document.querySelector('.conversation-rail-mark:first-child'),'::before').width==='14px'", 'conversation rail hover width');
-  check('conversation rail hover grows only slightly', true);
+  await waitPage("document.querySelector('.conversation-rail-mark:first-child').classList.contains('is-peak')", 'conversation rail hover peak');
+  check('conversation rail hover creates the 2.6 / 1.7 neighbor curve', await evaluate("(() => {const marks=[...document.querySelectorAll('.conversation-rail-mark')];return marks[0].dataset.visualScale==='2.6' && marks[1].dataset.visualScale==='1.7' && marks[0].classList.contains('is-peak') && marks[1].classList.contains('is-near');})()"));
   await waitPage("!document.querySelector('.conversation-rail-preview').hidden", 'conversation rail preview visible');
-  check('conversation rail preview shows the hovered turn prompt and answer excerpt', await evaluate("document.querySelector('.conversation-rail-preview-title').textContent==='设计系统浏览器验收' && document.querySelector('.conversation-rail-preview-text').textContent.length>0"));
+  check('conversation rail preview is 320px, 8px from the marker, and shows prompt and answer', await evaluate("(() => {const mark=document.querySelector('.conversation-rail-mark:first-child').getBoundingClientRect(),preview=document.querySelector('.conversation-rail-preview').getBoundingClientRect();return preview.width===320 && Math.round(preview.left-mark.right)===8 && document.querySelector('.conversation-rail-preview-title').textContent==='设计系统浏览器验收' && document.querySelector('.conversation-rail-preview-text').textContent.length>0;})()"));
   await screenshot('conversation-rail-dark');
-  await evaluate("window.__railNavigation=null;document.querySelector('#timeline .turn').scrollIntoView=function(options){window.__railNavigation=options?.block||''}");
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 900, y: 400 });
+  await evaluate("(() => {const timeline=document.querySelector('#timeline');for(let i=0;i<120;i++){const turn=document.createElement('article');turn.className='turn';turn.dataset.railFixture='true';const query=document.createElement('div');query.className='user-message';query.textContent=`历史问题 ${i+1}`;turn.append(query);timeline.append(turn);}})()");
+  await waitPage("document.querySelectorAll('.conversation-rail-mark').length===122", 'conversation rail long directory');
+  await evaluate("(() => {const main=document.querySelector('#main');main.scrollTop=main.scrollHeight;main.dispatchEvent(new Event('scroll'));})()");
+  await waitPage("Number(document.querySelector('.conversation-rail-mark.is-active')?.dataset.itemIndex)>80 && document.querySelector('.conversation-rail-marks').scrollTop>0", 'conversation rail keeps long-directory active item visible');
+  check('conversation rail confines long histories to its own vertical scroller', await evaluate("(() => {const root=document.querySelector('.conversation-rail-marks');return root.scrollHeight>root.clientHeight && getComputedStyle(root).overflowY==='auto';})()"));
+  await evaluate("(() => {document.querySelectorAll('[data-rail-fixture]').forEach(node=>node.remove());const main=document.querySelector('#main');main.scrollTop=0;main.dispatchEvent(new Event('scroll'));})()");
+  await waitPage("document.querySelectorAll('.conversation-rail-mark').length===2", 'conversation rail fixture cleanup');
+  await evaluate("window.__railNavigation=null;document.querySelector('#main').scrollTo=function(options){window.__railNavigation=options?.behavior||''}");
   await click('.conversation-rail-mark:first-child');
-  check('conversation rail marker navigates to its turn', await evaluate("window.__railNavigation==='start'"));
+  check('conversation rail marker smoothly navigates to the exact query', await evaluate("window.__railNavigation==='smooth'"));
 
 
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 900, deviceScaleFactor: 1, mobile: false });
   check('the 390px main workspace has no horizontal overflow', await evaluate("document.documentElement.scrollWidth<=390 && document.querySelector('.shell').scrollWidth<=390"));
+  await waitPage("!document.querySelector('#conversation-rail').classList.contains('is-wide')", 'conversation rail narrow container state');
+  await waitPage("getComputedStyle(document.querySelector('#conversation-rail')).visibility==='hidden'", 'conversation rail narrow transition');
+  check('conversation rail hides below its 864px container threshold', await evaluate("getComputedStyle(document.querySelector('#conversation-rail')).visibility==='hidden'"));
   await waitPage("document.querySelector('#chat-sidebar').inert && getComputedStyle(document.querySelector('#sidebar-resizer')).display==='none'", 'mobile sidebar state synchronized');
   await click('#sidebar-toggle');
   await waitPage("document.querySelector('.shell').classList.contains('sidebar-open') && !document.querySelector('#chat-sidebar').inert", 'mobile drawer opened');

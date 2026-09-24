@@ -28,7 +28,12 @@ pub fn from_environment(workspace: &FsPath, demo: bool) -> SessionResult<Arc<Sto
 }
 
 #[derive(Clone)]
-struct Service { store: Arc<Store>, tasks: SessionApplication, workspaces: Option<Arc<crate::workspace_routes::Service>> }
+struct Service {
+    store: Arc<Store>,
+    tasks: SessionApplication,
+    workspaces: Option<Arc<crate::workspace_routes::Service>>,
+    side: Option<Arc<crate::side_routes::Service>>,
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Create { request_id: String, project_id: Option<String> }
@@ -81,7 +86,14 @@ async fn authenticate(State(auth): State<Arc<Auth>>, request: Request, next: Nex
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")); response
 }
-pub fn router(store: Arc<Store>, app: AgentApplication, token: String, origin: Option<String>, workspaces: Option<Arc<crate::workspace_routes::Service>>) -> std::result::Result<Router, Box<dyn std::error::Error>> {
+pub fn router(
+    store: Arc<Store>,
+    app: AgentApplication,
+    token: String,
+    origin: Option<String>,
+    workspaces: Option<Arc<crate::workspace_routes::Service>>,
+    side: Option<Arc<crate::side_routes::Service>>,
+) -> std::result::Result<Router, Box<dyn std::error::Error>> {
     if !(32..=512).contains(&token.len()) || !token.bytes().all(|b| b.is_ascii_graphic()) { return Err("invalid session bearer token".into()); }
     let mut cors = CorsLayer::new().allow_methods([Method::GET, Method::POST]).allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     if let Some(origin) = origin {
@@ -98,7 +110,7 @@ pub fn router(store: Arc<Store>, app: AgentApplication, token: String, origin: O
         .route("/api/sessions/{id}/archive", post(archive))
         .route("/api/sessions/{id}/unread", post(unread))
         .route("/api/sessions/{id}/delete", post(delete))
-        .with_state(Service { tasks: SessionApplication::new(store.clone(), app), store, workspaces })
+        .with_state(Service { tasks: SessionApplication::new(store.clone(), app), store, workspaces, side })
         .layer(DefaultBodyLimit::max(128 * 1024))
         .layer(middleware::from_fn_with_state(Arc::new(Auth(token)), authenticate)).layer(cors))
 }
@@ -141,13 +153,19 @@ async fn rename(State(s): State<Service>, Path(id): Path<String>, value: std::re
     let value = body(value)?; Ok(Json(disk(move || s.store.rename(&id, value.revision, &value.title)).await?))
 }
 async fn delete(State(s): State<Service>, Path(id): Path<String>, value: std::result::Result<Json<Revision>, JsonRejection>) -> std::result::Result<StatusCode, HttpError> {
-    let value = body(value)?; disk(move || s.store.delete(&id, value.revision)).await?; Ok(StatusCode::NO_CONTENT)
+    let value = body(value)?;
+    let sid = id.clone(); disk(move || s.store.delete(&sid, value.revision)).await?;
+    if let Some(side) = s.side { side.drop_parent(&id); }
+    Ok(StatusCode::NO_CONTENT)
 }
 async fn pin(State(s): State<Service>, Path(id): Path<String>, value: std::result::Result<Json<Flag>, JsonRejection>) -> std::result::Result<Json<Header>, HttpError> {
     let value = body(value)?; Ok(Json(disk(move || s.store.set_pinned(&id, value.revision, value.value)).await?))
 }
 async fn archive(State(s): State<Service>, Path(id): Path<String>, value: std::result::Result<Json<Flag>, JsonRejection>) -> std::result::Result<Json<Header>, HttpError> {
-    let value = body(value)?; Ok(Json(disk(move || s.store.set_archived(&id, value.revision, value.value)).await?))
+    let value = body(value)?; let archived = value.value; let sid = id.clone();
+    let header = disk(move || s.store.set_archived(&sid, value.revision, archived)).await?;
+    if archived { if let Some(side) = s.side { side.drop_parent(&id); } }
+    Ok(Json(header))
 }
 async fn unread(State(s): State<Service>, Path(id): Path<String>, value: std::result::Result<Json<Flag>, JsonRejection>) -> std::result::Result<Json<Header>, HttpError> {
     let value = body(value)?; Ok(Json(disk(move || s.store.set_unread(&id, value.revision, value.value)).await?))

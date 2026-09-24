@@ -94,7 +94,9 @@ async function launchBrowser(origin, session) {
   await send('Page.enable');await send('Runtime.enable');await send('Emulation.setFocusEmulationEnabled',{enabled:true});
   await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
   await send('Page.navigate',{url:`${origin}/#session=${session}`});
-  await waitPage("document.querySelector('#workspace-path')?.textContent.length>0 && !document.querySelector('#sessions-refresh').disabled",'workspace UI ready');
+  await waitPage("!document.querySelector('#workspace-files-open').hidden && !document.querySelector('#sessions-refresh').disabled",'workspace UI ready');
+  await click('#workspace-files-open');
+  await waitPage("document.querySelector('#workspace-path')?.textContent.length>0",'workspace files ready');
 }
 try {
   ui=await startUiServer({host:'127.0.0.1',port:0,endpoint,token});const origin=`http://127.0.0.1:${ui.address().port}`;
@@ -169,19 +171,20 @@ try {
   await writeFile(join(a.workspace,'pixel.png'),Buffer.from(png,'base64'));
   if(process.env.MONA_TEST_SKIP_BROWSER!=='1'){
     await launchBrowser(origin,a.id);
-    check('right file panel follows the selected persisted session',await evaluate(`document.querySelector('#workspace-path').textContent===${JSON.stringify(a.workspace)}`));
+    check('workspace file view follows the selected persisted session',await evaluate(`document.querySelector('#workspace-path').textContent===${JSON.stringify(a.workspace)}`));
     await waitPage("document.querySelector('.file-entry[data-path=\"result.txt\"]')",'files listed');await click('.file-entry[data-path="result.txt"]');
-    await waitPage("document.querySelector('#file-content').textContent.includes('ORDINARY_A_CHANGED')",'text preview');
-    check('real file preview appears without sending another Agent task',await evaluate("document.querySelector('.workspace-file-text')!==null"));
+    await waitPage("document.querySelector('#right-content > :not([hidden])').textContent.includes('ORDINARY_A_CHANGED')",'text preview');
+    check('real file preview appears without sending another Agent task',await evaluate("document.querySelector('.workspace-source-preview code')!==null"));
     await shot('workspace-light');
     await click('.file-entry[data-path="docs"]');await waitPage("document.querySelector('.file-entry[data-path=\"docs/example.rs\"]')",'nested directory');
-    await click('.file-entry[data-path="docs/example.rs"]');await waitPage("document.querySelector('#file-content').textContent.includes('fn main()')",'code preview');
-    await click('#files-parent');await waitPage("document.querySelector('.file-entry[data-path=\"pixel.png\"]')",'root directory');await click('.file-entry[data-path="pixel.png"]');
-    await waitPage("document.querySelector('#file-content img')?.naturalWidth>0",'image decoded');
+    await click('.file-entry[data-path="docs/example.rs"]');await waitPage("document.querySelector('#right-content > :not([hidden])').textContent.includes('fn main()')",'code preview');
+    await click('.file-entry[data-path="pixel.png"]');
+    await waitPage("document.querySelector('#right-content > :not([hidden]) img')?.naturalWidth>0",'image decoded');
     check('directory navigation and raster preview work through host authorization',true);
-    await click('.file-entry[data-path="long.txt"]');await waitPage("!document.querySelector('#file-more').hidden",'long file page');
-    const textLength=await evaluate("document.querySelector('#file-content').textContent.length");await click('#file-more');
-    await waitPage(`document.querySelector('#file-content').textContent.length>${textLength}`,'next text page');check('long files are paged instead of loading an unlimited response',true);
+    await click('.file-entry[data-path="long.txt"]');await waitPage("!document.querySelector('#right-content > :not([hidden]) .right-file-more').hidden",'long file page');
+    const textLength=await evaluate("document.querySelector('#right-content > :not([hidden]) code').textContent.length");await click('#right-content > :not([hidden]) .right-file-more');
+    await waitPage(`document.querySelector('#right-content > :not([hidden]) code').textContent.length>${textLength}`,'next text page');check('long files are paged instead of loading an unlimited response',true);
+    await click('#files-back-tasks');
     await click('#settings-button');await click('#settings-workspace-tab');
     await waitPage(`!document.querySelector('#workspace-root').disabled && document.querySelector('#workspace-root').value===${JSON.stringify(changed.default_root)}`,'workspace settings');
     await fill('#workspace-root',projectTwo);await click('#workspace-root-save');await waitPage("document.querySelector('#workspace-notice').textContent.includes('已保存')",'root saved from real form');
@@ -199,6 +202,9 @@ try {
       await click('#new-chat');await waitPage("document.querySelector('#project-context').textContent===''",'ordinary new task');
       check('global new-task entry does not inherit the last project',true);
     }else check('base-only UI hides project management while retaining files and settings',await evaluate("document.querySelector('#projects-region').hidden && !document.querySelector('#files-toggle').hidden"));
+    await waitPage(`document.querySelector('#sessions-list button[data-session-id="${a.id}"]') && !document.querySelector('#sessions-refresh').disabled`,'ordinary history available');
+    await click(`#sessions-list button[data-session-id="${a.id}"]`);
+    await waitPage("location.hash.includes('ordinary-a') && !document.querySelector('#sessions-refresh').disabled && !document.querySelector('#files-toggle').hidden",'saved session selected for mobile preview');
     await send('Emulation.setDeviceMetricsOverride',{width:390,height:900,deviceScaleFactor:1,mobile:false});
     await click('#files-toggle');await waitPage("!document.querySelector('#files-panel').hidden",'mobile files');
     check('390px right panel is an independent bounded overlay',await evaluate("document.querySelector('#files-panel').getBoundingClientRect().width<=390 && document.documentElement.scrollWidth<=390 && document.querySelector('#files-panel').getAttribute('aria-modal')==='true'"));

@@ -97,7 +97,7 @@ async fn host_routes_require_auth_and_never_accept_client_history_or_limits() {
     let tmp = tempfile::tempdir().unwrap(); let store = Store::open(&tmp.path().join("data"),tmp.path()).unwrap();
     let (mut host, service) = service(store.clone(),Arc::new(RememberModel::default())).await;
     let token = "test-only-sessions-token-32-characters";
-    let router = super::router(store,service.app.clone(),token.into(),None,None).unwrap();
+    let router = super::router(store,service.app.clone(),token.into(),None,None,None).unwrap();
     let unauth = router.clone().oneshot(HttpRequest::builder().uri("/api/sessions").body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(unauth.status(),StatusCode::UNAUTHORIZED); assert_eq!(unauth.headers()["cache-control"],"no-store");
     for payload in [json!({"request_id":"ok","history":[]}), json!({"request_id":"ok","limits":{}})] {

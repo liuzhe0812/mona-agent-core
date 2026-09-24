@@ -68,6 +68,25 @@ impl Service {
         }
         Ok(Vec::new())
     }
+    #[cfg(feature = "projects")]
+    fn project_files(&self, id: &str) -> Result<workspace::Directory> {
+        let registry = self.projects.as_ref().ok_or_else(|| error("unsupported", "项目管理未装配。"))?;
+        let project = registry.get(id)?;
+        let root = self.settings.allowed_root(std::path::Path::new(&project.path))?;
+        Ok(workspace::Directory::open(&root)?.excluding(self.settings.private_paths()))
+    }
+    /// Trusted application access shared by preview, review and user-owned terminals.
+    pub fn directory(&self, kind: &str, id: &str) -> Result<workspace::Directory> {
+        match kind {
+            "session" => {
+                let header = self.store.header(id).map_err(|e| error("not_found", &e.message))?;
+                self.settings.files(&header)
+            }
+            #[cfg(feature = "projects")]
+            "project" => self.project_files(id),
+            _ => Err(error("not_found", "工作区入口不存在。")),
+        }
+    }
     pub fn create(&self, key: &str, project_id: Option<&str>) -> Result<sessions::Header> {
         if let Ok(header) = self.store.header(&format!("s-{key}")) {
             if header.metadata.get("project.id").map(String::as_str) != project_id {
@@ -188,11 +207,15 @@ pub fn router(service: Arc<Service>, token: String, origin: Option<String>) -> R
         )
         .route("/api/sessions/{id}/workspace", get(info))
         .route("/api/sessions/{id}/files", get(list_files))
+        .route("/api/sessions/{id}/files/search", get(search_session_files))
         .route("/api/sessions/{id}/file", get(read_file));
     #[cfg(feature = "projects")]
     let router = router
         .route("/api/projects", get(list_projects).post(add_project))
-        .route("/api/projects/{id}/remove", post(remove_project));
+        .route("/api/projects/{id}/remove", post(remove_project))
+        .route("/api/projects/{id}/files", get(list_project_files))
+        .route("/api/projects/{id}/files/search", get(search_project_files))
+        .route("/api/projects/{id}/file", get(read_project_file));
     Ok(router
         .with_state(StateData { service })
         .layer(DefaultBodyLimit::max(32 * 1024))
@@ -276,6 +299,50 @@ struct FileQuery {
     limit: Option<usize>,
     revision: Option<String>,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchQuery {
+    q: String,
+    limit: Option<usize>,
+}
+#[derive(Serialize)]
+struct SearchResult {
+    entries: Vec<workspace::Entry>,
+}
+fn search_directory(directory: workspace::Directory, q: &str, limit: usize) -> Result<SearchResult> {
+    let q = q.trim().to_lowercase();
+    if q.is_empty() || q.len() > 320 || !(1..=200).contains(&limit) {
+        return Err(error("invalid_request", "文件搜索参数无效。"));
+    }
+    let mut stack = vec![String::new()];
+    let mut matches = Vec::new();
+    let mut scanned = 0usize;
+    while let Some(path) = stack.pop() {
+        let mut offset = 0usize;
+        loop {
+            let page = directory.list(&path, offset, 200, None)?;
+            for entry in page.entries {
+                scanned = scanned.saturating_add(1);
+                if scanned > 10_000 {
+                    return Err(error("capacity", "工作区文件超过搜索上限，请缩小搜索范围。"));
+                }
+                if entry.kind == "directory" {
+                    stack.push(entry.path.clone());
+                } else if entry.kind == "file" && entry.path.to_lowercase().contains(&q) {
+                    matches.push(entry);
+                    if matches.len() >= limit {
+                        return Ok(SearchResult { entries: matches });
+                    }
+                }
+            }
+            match page.next_offset {
+                Some(next) => offset = next,
+                None => break,
+            }
+        }
+    }
+    Ok(SearchResult { entries: matches })
+}
 async fn list_files(
     State(s): State<StateData>,
     Path(id): Path<String>,
@@ -331,6 +398,67 @@ async fn read_file(
         })
         .await?,
     ))
+}
+async fn search_session_files(
+    State(s): State<StateData>,
+    Path(id): Path<String>,
+    Query(q): Query<SearchQuery>,
+) -> std::result::Result<Json<SearchResult>, HttpError> {
+    let service = s.service;
+    let permit = service.readers.clone().try_acquire_owned()
+        .map_err(|_| HttpError(error("busy", "正在读取其他文件，请稍后重试。")))?;
+    Ok(Json(disk(move || {
+        let _permit = permit;
+        let header = service.store.header(&id).map_err(|e| error("not_found", &e.message))?;
+        search_directory(service.settings.files(&header)?, &q.q, q.limit.unwrap_or(100))
+    }).await?))
+}
+
+#[cfg(feature = "projects")]
+async fn list_project_files(
+    State(s): State<StateData>,
+    Path(id): Path<String>,
+    Query(q): Query<FileQuery>,
+) -> std::result::Result<Json<workspace::DirectoryPage>, HttpError> {
+    let service = s.service;
+    let permit = service.readers.clone().try_acquire_owned()
+        .map_err(|_| HttpError(error("busy", "正在读取其他文件，请稍后重试。")))?;
+    Ok(Json(disk(move || {
+        let _permit = permit;
+        service.project_files(&id)?.list(
+            q.path.as_deref().unwrap_or(""), q.offset.unwrap_or(0), q.limit.unwrap_or(100), q.revision.as_deref())
+    }).await?))
+}
+
+#[cfg(feature = "projects")]
+async fn read_project_file(
+    State(s): State<StateData>,
+    Path(id): Path<String>,
+    Query(q): Query<FileQuery>,
+) -> std::result::Result<Json<workspace::FilePage>, HttpError> {
+    let service = s.service;
+    let permit = service.readers.clone().try_acquire_owned()
+        .map_err(|_| HttpError(error("busy", "正在读取其他文件，请稍后重试。")))?;
+    Ok(Json(disk(move || {
+        let _permit = permit;
+        service.project_files(&id)?.read(
+            q.path.as_deref().unwrap_or(""), q.offset.unwrap_or(0), q.limit.unwrap_or(64 * 1024), q.revision.as_deref())
+    }).await?))
+}
+
+#[cfg(feature = "projects")]
+async fn search_project_files(
+    State(s): State<StateData>,
+    Path(id): Path<String>,
+    Query(q): Query<SearchQuery>,
+) -> std::result::Result<Json<SearchResult>, HttpError> {
+    let service = s.service;
+    let permit = service.readers.clone().try_acquire_owned()
+        .map_err(|_| HttpError(error("busy", "正在读取其他文件，请稍后重试。")))?;
+    Ok(Json(disk(move || {
+        let _permit = permit;
+        search_directory(service.project_files(&id)?, &q.q, q.limit.unwrap_or(100))
+    }).await?))
 }
 #[cfg(feature = "projects")]
 async fn list_projects(

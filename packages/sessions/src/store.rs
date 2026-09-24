@@ -1,6 +1,9 @@
 //! Local session storage. Hosts supply paths; commits are atomic full snapshots, not UI events.
 #[path = "context.rs"]
 mod context;
+#[cfg(feature = "search")]
+#[path = "search.rs"]
+pub mod search;
 use crate::{SessionError, SessionErrorCode as Code, SessionResult as Result};
 use api::*;
 use context::RunBase;
@@ -173,19 +176,6 @@ impl Store {
         let root = base.to_owned();
         fs::create_dir_all(&root).map_err(io_error)?;
         regular_path(&root, true)?;
-        for entry in fs::read_dir(&root).map_err(io_error)? {
-            let entry = entry.map_err(io_error)?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if entry.file_type().map_err(io_error)?.is_dir()
-                && name.len() == 64
-                && name.bytes().all(|b| b.is_ascii_hexdigit())
-            {
-                return Err(error(
-                    Code::InvalidRequest,
-                    "检测到旧工作区分组会话格式；请为格式 3 指定独立状态目录，旧记录未修改。",
-                ));
-            }
-        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

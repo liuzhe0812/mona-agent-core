@@ -7,6 +7,10 @@ import { SpillClient } from './spill.mjs';
 import { TurnView } from './run-view.mjs';
 import { ConversationUI } from './sessions-ui.mjs';
 import { WorkspaceUI } from './workspace-ui.mjs';
+import { RightPane } from './right-pane.mjs';
+import { WorkbenchUI } from './workbench-ui.mjs';
+import { SideConversationUI } from './side-conversation.mjs';
+import { MemoryUI } from './memory-ui.mjs';
 import { mountAppearance } from './appearance.mjs';
 import './tooltip.mjs';
 import './conversation-rail.mjs';
@@ -99,6 +103,7 @@ let providerEditorId = null;
 let providerEditorRevision = 0;
 let providerEditorModels = [];
 let modelEditor = null;
+const rightPane = new RightPane();
 let workspaceUI = null;
 const conversations = new ConversationUI({
   busy: () => starting || Boolean(active && !active.done),
@@ -120,6 +125,7 @@ const conversations = new ConversationUI({
 });
 
 workspaceUI = new WorkspaceUI({
+  pane: rightPane,
   currentProject: () => conversations.project,
   selectProject: project => conversations.selectProject(project),
   async projectsChanged() {
@@ -130,6 +136,23 @@ workspaceUI = new WorkspaceUI({
   },
 });
 
+new WorkbenchUI({ pane: rightPane, workspace: workspaceUI });
+
+const sideUI = new SideConversationUI({
+  pane: rightPane,
+  session: () => conversations.selected,
+  client: () => client,
+  artifactReader: spillResults,
+  available: () => workspaceUI?.features?.side === true,
+});
+
+const memoryUI = new MemoryUI({
+  session: () => conversations.selected,
+  async open(id) {
+    if (starting || conversations.loading || (active && !active.done)) throw new Error('请先等待当前任务结束再打开历史会话。');
+    await conversations.open(id); hideSettings();
+  },
+});
 
 function normalizeModelSettings(value) {
   const providers = Array.isArray(value?.providers) ? value.providers.map((provider) => ({
@@ -187,6 +210,9 @@ function clearModelSettings() {
   capabilities.clear();
   spillResults.clear();
   workspaceUI?.clear();
+  rightPane.setScope('none');
+  sideUI.clear();
+  memoryUI.clear();
   capabilitiesState = null;
   modelSettingsState = null;
   modelSettingsActiveId = null;
@@ -296,13 +322,14 @@ async function saveProviderRecord(provider, fields = {}, successMessage = '已�
 }
 
 function selectSettingsSection(section) {
-  if (!['components', 'tools', 'models', 'appearance', 'workspace'].includes(section)) section = 'components';
+  if (!['components', 'tools', 'models', 'appearance', 'workspace', 'memory'].includes(section)) section = 'components';
   for (const [name, panel, tab] of [
     ['components', componentSettingsSection, componentsTab],
     ['tools', toolSettingsSection, toolsTab],
     ['models', modelSettingsSection, modelsTab],
     ['appearance', appearanceSection, appearanceTab],
     ['workspace', $('#workspace-settings-section'), $('#settings-workspace-tab')],
+    ['memory', $('#memory-settings-section'), $('#settings-memory-tab')],
   ]) {
     const selected = section === name;
     panel.hidden = !selected;
@@ -310,7 +337,9 @@ function selectSettingsSection(section) {
     if (selected) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
   }
-  if (section === 'workspace') {
+  if (section === 'memory') {
+    void memoryUI.refresh();
+  } else if (section === 'workspace') {
     void workspaceUI.refreshSettings();
     $('#workspace-root').focus();
   } else if (section === 'appearance') {
@@ -936,6 +965,13 @@ async function subscribeRun(runId, view, dom) {
 async function submitPrompt() {
   const value = prompt.value.trim();
   if (!value || !client || starting || !conversations.canSend) return;
+  const sideCommand = /^\/(?:side|btw)(?:\s+([\s\S]*))?$/i.exec(value);
+  if (sideCommand) {
+    prompt.value = '';
+    try { await sideUI.open(sideCommand[1] || ''); }
+    catch (error) { conversations.notice(error?.message || '无法打开侧边对话。', true); }
+    return;
+  }
   prompt.value = '';
   setBusy(Boolean(active && !active.done));
   if (active && !active.done) {
@@ -994,6 +1030,8 @@ async function connectHttp(baseUrl, bearer) {
   modelSettings.configure(baseUrl, bearer);
   capabilities.configure(baseUrl, bearer);
   spillResults.configure(baseUrl, bearer);
+  sideUI.configure(baseUrl, bearer);
+  memoryUI.configure(baseUrl, bearer);
   setBusy(false);
   void refreshModelSettings({ silent: true });
   void refreshCapabilities({ silent: true });
@@ -1089,6 +1127,7 @@ toolsTab.addEventListener('click', () => selectSettingsSection('tools'));
 modelsTab.addEventListener('click', () => selectSettingsSection('models'));
 appearanceTab.addEventListener('click', () => selectSettingsSection('appearance'));
 $('#settings-workspace-tab').addEventListener('click', () => selectSettingsSection('workspace'));
+$('#settings-memory-tab').addEventListener('click', () => selectSettingsSection('memory'));
 componentsRefresh.addEventListener('click', () => { void refreshCapabilities(); });
 toolsRefresh.addEventListener('click', () => { void refreshCapabilities(); });
 const shell = $('.shell');

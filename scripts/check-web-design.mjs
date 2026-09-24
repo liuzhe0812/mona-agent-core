@@ -5,14 +5,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
-const FEATURE_CSS = ['apps/web/styles.css', 'apps/web/sessions.css', 'apps/web/appearance.css', 'apps/web/workspace.css'];
+const FEATURE_CSS = ['apps/web/styles.css', 'apps/web/sessions.css', 'apps/web/appearance.css', 'apps/web/workspace.css', 'apps/web/memory.css'];
 const OWNERSHIP_ROOTS = ['apps/web', 'docs/ui'];
 const OWNERSHIP_TEXT_EXTENSIONS = new Set(['.css', '.html', '.js', '.json', '.md', '.mjs', '.toml', '.ts', '.txt', '.yaml', '.yml']);
 const LEGACY_EXTERNAL_NAME = ['cin', 'dy'].join('');
 const RUNTIME_JS = [
+  'apps/web/pane-icons.mjs', 'apps/web/file-preview.mjs', 'apps/web/workbench-ui.mjs',
   'apps/web/app.mjs', 'apps/web/appearance.mjs', 'apps/web/theme.mjs',
   'apps/web/run-view.mjs', 'apps/web/content-renderer.mjs', 'apps/web/sessions-ui.mjs', 'apps/web/tooltip.mjs',
-  'apps/web/conversation-rail.mjs', 'apps/web/workspace-ui.mjs',
+  'apps/web/conversation-rail.mjs', 'apps/web/workspace-ui.mjs', 'apps/web/right-pane.mjs', 'apps/web/side-conversation.mjs',
+  'apps/web/memory-ui.mjs',
 ];
 const REQUIRED_DECLARATIONS = Object.freeze({
   '--ui-control-sm': '32px', '--ui-control-md': '36px', '--ui-control-lg': '40px',
@@ -38,6 +40,12 @@ const RUNTIME_STYLE_ALLOW = Object.freeze({
   'apps/web/sessions-ui.mjs': [
     /^menu\.style\.(?:left|top) = /,
   ],
+  'apps/web/right-pane.mjs': [
+    /^this\.shell\.style\.setProperty\('--right-pane-width', `\$\{this\.width\}px`\);$/,
+  ],
+  'apps/web/conversation-rail.mjs': [
+    /^preview\.style\.top = `\$\{top\}px`;$/,
+  ],
 });
 const RUNTIME_LAYOUT_MARKERS = Object.freeze({
   'apps/web/app.mjs': [
@@ -46,6 +54,9 @@ const RUNTIME_LAYOUT_MARKERS = Object.freeze({
   ],
   'apps/web/sessions-ui.mjs': [
     'const SESSION_MENU_VIEWPORT_GUTTER = 8;', 'const SESSION_MENU_ANCHOR_GAP = 4;',
+  ],
+  'apps/web/conversation-rail.mjs': [
+    'const NAVIGATOR_MIN_WIDTH_PX = 864;', 'const PREVIEW_VIEWPORT_GUTTER_PX = 16;',
   ],
 });
 const REQUIRED_TOKENS = [
@@ -104,7 +115,7 @@ export function auditFeatureCss(source, file = '<css>') {
   }
   for (const match of clean.matchAll(/box-shadow\s*:\s*([^;}]*)/gi)) {
     const value = match[1];
-    if (!/var\(--focus-ring-soft\)/.test(value) && !/^\s*none\s*$/i.test(value)) {
+    if (!/var\(--(?:focus-ring-soft|ui-shadow-hover-card)\)/.test(value) && !/^\s*none\s*$/i.test(value)) {
       violations.push(violation(file, clean, match, 'Ad-hoc elevation shadows are forbidden; only the shared focus indicator is allowed in formal feature CSS.'));
     }
   }

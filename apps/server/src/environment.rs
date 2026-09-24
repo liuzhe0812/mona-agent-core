@@ -9,6 +9,32 @@ use std::{
 };
 use tokio::sync::{broadcast, Mutex as AsyncMutex};
 type HostResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+const HOST_WORKSPACE_KEY: &str = "mona.host_workspace_binding";
+// An ephemeral child inherits its parent's history authority, not a writable Session identity.
+#[cfg(feature = "history-search")]
+const HOST_HISTORY_SESSION_KEY: &str = "mona.host_history_session";
+
+#[cfg(feature = "history-search")]
+fn history_scope(
+    store: &sessions::Store,
+    cwd: &str,
+    metadata: &std::collections::BTreeMap<String, String>,
+) -> Result<sessions::search::Scope> {
+    let session = metadata.get(sessions::SESSION_KEY).or_else(|| metadata.get(HOST_HISTORY_SESSION_KEY));
+    let project = match session {
+        Some(id) => {
+            let header = store.header(id).map_err(config_error)?;
+            if header.workspace != cwd {
+                return Err(config_error("历史检索目录未绑定。"));
+            }
+            header.metadata.get("project.id").cloned()
+        }
+        None => None,
+    };
+    // Sharing a filesystem directory does not grant access to another project's conversations.
+    Ok(sessions::search::Scope::Metadata { key: "project.id".into(), value: project })
+}
+
 fn config_error(e: impl std::fmt::Display) -> AgentError {
     AgentError::new(ErrorCode::Configuration, e.to_string())
 }
@@ -165,11 +191,7 @@ impl Factory {
         if let (Some(root), Some(search)) = (&root, &self.history) {
             let cwd = root.to_string_lossy().into_owned(); let store = self.store.clone();
             let scope: sessions::search::ScopeResolver = Arc::new(move |ctx| {
-                if let Some(id) = ctx.metadata.get(sessions::SESSION_KEY) {
-                    let header = store.header(id).map_err(config_error)?;
-                    if header.workspace != cwd { return Err(config_error("历史检索目录未绑定。")); }
-                    Ok(sessions::search::Scope::Metadata { key: "project.id".into(), value: header.metadata.get("project.id").cloned() })
-                } else { Ok(sessions::search::Scope::Workspace(cwd.clone())) }
+                history_scope(&store, &cwd, &ctx.metadata)
             });
             for tool in sessions::search::tools(search.clone(), scope) { builder = builder.tool(tool); }
         }
@@ -272,7 +294,9 @@ impl AgentRuntime for DirectoryRuntime {
         self.default.runtime.validate_history(messages, options)
     }
     fn start(&self, request: RunRequest) -> Result<RunHandle> {
-        let environment = match request.metadata.get(sessions::SESSION_KEY) {
+        let binding = request.metadata.get(HOST_WORKSPACE_KEY)
+            .or_else(|| request.metadata.get(sessions::SESSION_KEY));
+        let environment = match binding {
             Some(id) => self
                 .bindings
                 .lock()
@@ -415,6 +439,40 @@ impl Environments {
             )
         })?
     }
+    /// Start one host-owned ephemeral run in a persisted session's cwd.
+    /// It inherits trusted history but carries no Session/Turn identity, so SessionSink stays inert.
+    pub async fn start_ephemeral_with_history(
+        self: &Arc<Self>,
+        settings: Arc<crate::workspace_setup::WorkspaceSettings>,
+        app: application::AgentApplication,
+        parent_session: String,
+        binding_id: String,
+        request: application::StartRequest,
+        history: Vec<Message>,
+    ) -> application::ApplicationResult<application::StartResponse> {
+        let store = self.factory.store.clone();
+        let header = tokio::task::spawn_blocking(move || store.header(&parent_session))
+            .await
+            .map_err(|_| application::ApplicationError::new(
+                application::ApplicationErrorCode::Internal, "会话读取失败。"
+            ))??;
+        let cwd = settings.bound_root(Path::new(&header.workspace)).map_err(|e| {
+            application::ApplicationError::new(application::ApplicationErrorCode::InvalidRequest, e.message)
+        })?;
+        let environment = self.environment(&cwd).await.map_err(application::ApplicationError::from)?;
+        self.runtime.bindings.lock().map_err(|_| {
+            application::ApplicationError::new(application::ApplicationErrorCode::Internal, "目录绑定失败。")
+        })?.insert(binding_id.clone(), environment);
+        let binding = Binding { runtime: self.runtime.clone(), id: binding_id.clone() };
+        let metadata = std::collections::BTreeMap::from([
+            (HOST_WORKSPACE_KEY.into(), binding_id),
+            #[cfg(feature = "history-search")]
+            (HOST_HISTORY_SESSION_KEY.into(), header.id),
+        ]);
+        let result = app.start_task_with_history(request, history, metadata);
+        drop(binding);
+        result
+    }
     pub async fn shutdown(&self) -> Result<()> {
         let mut gate = self.admission.lock().await;
         *gate = true;
@@ -425,5 +483,30 @@ impl Environments {
             pool.remove(&key);
         }
         self.runtime.default.host.lock().await.shutdown().await
+    }
+}
+
+#[cfg(all(test, feature = "history-search"))]
+mod history_scope_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn project_scope_survives_ephemeral_children_without_granting_session_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = sessions::Store::open(&dir.path().join("state"), dir.path()).unwrap();
+        let a = store.create_in("project-a", dir.path(), BTreeMap::from([("project.id".into(), "a".into())])).unwrap();
+        let b = store.create_in("project-b", dir.path(), BTreeMap::from([("project.id".into(), "b".into())])).unwrap();
+        assert_eq!(a.workspace, b.workspace);
+        for (header, project) in [(&a, "a"), (&b, "b")] {
+            let child = BTreeMap::from([(HOST_HISTORY_SESSION_KEY.into(), header.id.clone())]);
+            assert!(!child.contains_key(sessions::SESSION_KEY));
+            assert!(!child.contains_key(sessions::TURN_KEY));
+            assert!(matches!(history_scope(&store, &header.workspace, &child).unwrap(),
+                sessions::search::Scope::Metadata { key, value: Some(value) } if key == "project.id" && value == project));
+            assert!(history_scope(&store, "different-directory", &child).is_err());
+        }
+        assert!(matches!(history_scope(&store, &a.workspace, &BTreeMap::new()).unwrap(),
+            sessions::search::Scope::Metadata { key, value: None } if key == "project.id"));
     }
 }

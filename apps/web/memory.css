@@ -1,0 +1,19 @@
+/* Memory management uses existing Mona tokens and controls. */
+.memory-section { display: flex; flex-direction: column; gap: var(--ui-space-3); min-width: 0; margin-bottom: var(--ui-space-6); }
+.memory-heading, .memory-entry-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--ui-space-2); }
+.memory-heading { justify-content: space-between; }
+.memory-heading h3 { font-size: var(--ui-text-16); font-weight: var(--ui-weight-medium); margin: 0; }
+.memory-heading label { min-width: 0; margin: 0; }
+#memory-scope { max-width: 100%; }
+.memory-entry, .memory-history-hit { padding: var(--ui-space-3) 0; border-bottom: var(--ui-border) solid var(--border-default); min-width: 0; }
+.memory-entry { display: flex; align-items: flex-start; gap: var(--ui-space-3); }
+.memory-entry-copy { flex: 1; min-width: 0; }
+.memory-entry-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--ui-text-13); margin: 0 0 var(--ui-space-2); user-select: text; }
+.memory-entry-source, #memory-capacity, .memory-empty, .memory-help { color: var(--text-secondary); font-size: var(--ui-text-12); overflow-wrap: anywhere; }
+.memory-history-hit strong { display: block; font-size: var(--ui-text-13); font-weight: var(--ui-weight-medium); margin-bottom: var(--ui-space-2); overflow-wrap: anywhere; }
+#history-search-form { display: flex; gap: var(--ui-space-2); flex-wrap: wrap; }
+#history-query { flex: 1; min-width: 0; }
+#history-original { border: var(--ui-border) solid var(--border-default); border-radius: var(--ui-radius-container); padding: var(--ui-space-3); }
+#history-read-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 400px; overflow: auto; font-size: var(--ui-text-13); user-select: text; }
+#memory-form textarea { width: 100%; min-height: 144px; }
+@media (max-width: 680px) { .memory-entry { flex-direction: column; } .memory-heading { align-items: flex-start; } }
