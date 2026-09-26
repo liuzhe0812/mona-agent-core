@@ -4,7 +4,7 @@
 
 ## 1. 项目定位
 
-Mona 是可嵌入的 Agent 执行底座、可组合的扩展能力和一个 Web 产品。它不是要求所有业务都经过 HTTP 的单体服务，也不把编程、运维或办公定义成额外的架构层。
+Mona 由可嵌入的 Agent 执行底座、可组合扩展，以及 Web/桌面应用组成。它不是要求所有业务都经过 HTTP 的单体服务，也不把编程、运维或办公定义成额外的架构层。
 
 **最小化的是核心职责，不是可靠性。** 当前运行历史、完整模型响应校验、工具调度、预算、取消和可靠提交时点留在核心；具体模型协议、工具实现、压缩算法、文件存储与界面由外部装配。
 
@@ -14,9 +14,11 @@ Mona 是可嵌入的 Agent 执行底座、可组合的扩展能力和一个 Web 
 |---|---|---|---|
 | 核心层 | `api`、`runtime` | 公共执行契约、唯一默认 ReAct 循环、当前 Run 状态、统一模型网关、工具调度、必要扩展时点 | 供应商配置文件、SQLite、长期记忆文件、工作区登记、Web 页面 |
 | 扩展层 | 模型、工具、上下文、持久化与编排组件 | 通过普通接口或薄 Plugin 提供可独立复用的具体能力 | 复制底层执行循环；把宿主账号或页面逻辑写进通用组件 |
-| 产品层（Web） | `application`、Bridge、Client、`apps/server`、`apps/web` | 任务调用管理、传输、配置、授权、资源装配和交互 | 另做一套模型重试、工具执行或会话存储实现 |
+| 应用层（宿主与界面） | `application`、Bridge、Client、`apps/server`、`apps/web`、`apps/desktop` | 任务调用管理、传输、配置、授权、资源装配和交互 | 另做一套模型重试、工具执行或会话存储实现 |
 
 `api` 是契约，不执行任务；`runtime` 是默认实现。扩展可依赖其他有明确职责的扩展，例如 `models` 使用 `providers`，但不应反向依赖 Web 才能使用。
+
+“应用层”覆盖宿主与用户界面，不等于 `application` 这一个包。编程、运维、办公的流程与页面可以位于这一层；可复用操作继续留在工具或扩展中，因此不另加“业务层”。`eval-harness/` 是独立的 Python 测评工程，通过公开接口测试 Agent，不进入上述生产依赖链。
 
 ### 扩展按职责组合
 
@@ -28,7 +30,9 @@ Mona 是可嵌入的 Agent 执行底座、可组合的扩展能力和一个 Web 
 | 长期信息 | `sessions`、`memory` | 前者保存会话事实并提供可选历史检索；后者保存少量可维护的长期事实 |
 | 大结果 | `spill` | 保存和取回有期限的大段文本；不是永久附件库 |
 | 工作目录与组织 | `workspace`、`projects` | 前者提供目录规范化和受根约束的只读访问；后者提供可选项目登记 |
-| 上层任务编排 | `planner` | 生成有限计划、顺序调用已有执行器，共享任务预算；不是第二套 ReAct |
+| 计划与进度 | `planner` | 同一 Agent 的有界清单、仅规划模式和宿主继续接口；不派发子 Run、不包含审批 |
+| 本机文件副作用隔离 | `sandbox` | 约束 Agent Shell 与 write/edit；不隔离一般读取、联网或原生插件 |
+| 子任务委派 | `subagent` | 复用公共 Runtime，独立会话、共享预算与父任务生命周期，不扩大授权 |
 
 ## 3. 生产依赖与执行调用分开看
 
@@ -62,6 +66,8 @@ flowchart LR
 
 Server 是组合根，可以同时依赖具体执行器与所选扩展。这样的依赖不应从 Server 反向传播到内层包。
 
+Web 配套模块属于应用层，通过本地 catalog、UI Registry 和固定插槽注册。后端扩展没有 DOM 或页面契约依赖；宿主清单决定本构建可加载的模块，实际交互仍需安全业务接口。见 [产品 UI 装配](WEB.zh-CN.md#ui-modules)。
+
 ### 执行调用图
 
 下面表示运行时调用，不是编译依赖。Application 使用公共 `AgentRuntime` 接口，宿主决定注入哪个实现。
@@ -94,8 +100,10 @@ flowchart TB
 | 持久多轮对话 | 增加 `sessions`，按需增加 `compaction` | 存储目录、权限域、当前配置、同一组 Store/Sink/运行包装装配 |
 | 长期偏好或事实注入 | 增加 `memory` | 明确可读写空间、容量和 Agent 写入授权 |
 | 查询历史原文 | 启用 `sessions/search` 并装配读取工具 | 给每次运行解析可信搜索范围 |
+| 计划与进度管理 | 增加 `planner` 的来源、工具、选择器和派发策略 | 从正确会话恢复状态、绑定新 Run；宿主控制显式模式及版本，不改原有工具权限 |
 | Web 或远程客户端 | 增加 `application`、`http-bridge`、所选界面 | 身份与管理权限、监听/TLS、产品配置和部署策略 |
-| Tauri 桌面客户端 | 增加 `application`、`tauri-bridge` | Tauri 原生依赖、可信窗口与 capability、产品专有命令 |
+| 自行嵌入 Tauri | 增加 `application`、`tauri-bridge` | Tauri 原生依赖、可信窗口与 capability、应用专有命令 |
+| 使用现成桌面应用 | `apps/desktop` + 同进程 `server` 库 + `apps/web` | 本机状态目录、受信窗口与环回 HTTP；不启动额外 Node 业务服务 |
 
 选择现成 Web Server 意味着采用该产品的一组默认能力，不意味着这些能力全部是 Core 的强制依赖。Tauri Bridge 也不是完整桌面产品。
 
@@ -107,6 +115,7 @@ flowchart TB
 | 本轮模型请求投影 | Runtime 调度，扩展变换 | 不能回写成用户原话或破坏工具调用/结果配对 |
 | 持久会话与工作集 | Sessions | 当前系统指令、权限和密钥由宿主提供，不能从旧档案恢复授权 |
 | 精选长期事实 | Memory 的绑定后端 | 允许纠正与删除，但不改写过去的会话事实 |
+| 当前计划与进度 | Planner 暂态；确认后为工具结果/检查点，标准宿主另在同一 Sessions 文件维护当前投影 | 临时计划不是长期 Memory；已完成声明不证明业务成功，不从摘要恢复模式 |
 | UI 快照和事件回放 | Runtime 的有界展示状态、Application/Client 的投影 | 可以裁剪；不能用它替代执行状态或完整历史 |
 | 模型配置、工作目录、权限域 | 宿主与对应管理扩展 | 运行时绑定不受界面切换影响 |
 
@@ -126,11 +135,11 @@ flowchart TB
 
 ## 7. 必须保留的整体限制
 
-Mona 的原生 Rust 扩展是可信同进程代码，不是安全沙箱。工具白名单与目录绑定不能代替操作系统隔离。一个 Application/宿主默认属于一个可信权限域，多用户身份、跨租户隔离和外部系统授权需由产品宿主补充。
+Mona 的原生 Rust 扩展是可信同进程代码，工具白名单与目录绑定本身不能代替操作系统隔离。可选 [Sandbox](../../packages/sandbox/README.md) 通过原生后端限制 Agent Shell 文件副作用，并在 write/edit 的原子修改路径使用同一策略；不隔离一般读取、联网、宿主保存、用户手动终端或原生插件。一个 Application/宿主默认属于一个可信权限域，多用户身份、跨租户隔离和外部系统授权仍由产品宿主补充。
 
 取消不等于回滚；记录了工具 intent 不等于工具一定没有执行。会话恢复是恢复已确认历史并允许显式继续，不是自动重跑中断任务，也不保证外部副作用永久 exactly-once。
 
-当前没有内置自进化调度、自动 Skills 提炼、动态插件下载或热加载。Memory 可独立工作，不以这些机制为前提。Planner 的有限顺序执行也不等于自动重规划或多 Agent 系统。
+当前没有内置自进化调度、自动 Skills 提炼、动态插件下载或热加载。Memory 可独立工作，不以这些机制为前提。Planner 只管理同一 Agent 的计划与进度；修改尚未完成的步骤不等于启动另一个规划 Agent、自动派发子 Run 或启用审批/沙箱。
 
 ## 源码定位
 
@@ -140,5 +149,5 @@ Mona 的原生 Rust 扩展是可信同进程代码，不是安全沙箱。工具
 | Host 装配与默认执行器 | [`runtime/src/host.rs`](../../packages/runtime/src/host.rs)、[`engine.rs`](../../packages/runtime/src/engine.rs) |
 | 可选依赖 | [`application/Cargo.toml`](../../packages/application/Cargo.toml)、[`sessions/Cargo.toml`](../../packages/sessions/Cargo.toml) |
 | 模型路由与会话包装 | [`models/src/lib.rs`](../../packages/models/src/lib.rs)、[`sessions/src/lifecycle.rs`](../../packages/sessions/src/lifecycle.rs) |
-| 正式组合根 | [`server/src/main.rs`](../../apps/server/src/main.rs)、[`environment.rs`](../../apps/server/src/environment.rs) |
+| 正式组合根 | [`server/src/lib.rs`](../../apps/server/src/lib.rs)、[`environment.rs`](../../apps/server/src/environment.rs)、[`desktop/src/main.rs`](../../apps/desktop/src/main.rs) |
 | 可执行接入例子 | [`minimal.rs`](../../examples/demo/src/bin/minimal.rs)、[`generic_extensions.rs`](../../examples/demo/src/bin/generic_extensions.rs)、[`tauri-composition`](../../examples/tauri-composition) |

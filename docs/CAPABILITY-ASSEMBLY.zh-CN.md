@@ -19,6 +19,18 @@ user_configurable = false
 enabled = true
 user_configurable = true
 
+[capabilities.memory]
+enabled = true
+user_configurable = true
+
+[capabilities.history-search]
+enabled = true
+user_configurable = true
+
+[capabilities.memory_update]
+enabled = false
+user_configurable = true
+
 [capabilities.skills]
 enabled = false
 user_configurable = true
@@ -95,7 +107,7 @@ user_configurable = true
 
 最终用户入口拆为“设置 → Agent 组件”和“设置 → Agent 工具”。组件页只展示可开关的可选组件，工具页只展示可开关的可选工具；两页都不显示“当前已启用”“可由当前用户管理”等对操作没有帮助的标签。固定基础项、最小运行必备项和部署锁定项直接隐藏。“模型设置”独立负责供应商、凭据、模型目录和默认模型，不混入组件清单。
 
-正式 Web 组合固定提供四个基础工具，默认关闭三个检索工具，默认启用上下文压缩和长结果归档。归档通过固定 `read` 取回，不增加第五个默认工具。Skills 随发行版编译但默认关闭，显式启用并重启后才扫描目录和发布目录投影。
+正式 Web 组合提供四个基础文件/执行工具，`grep/find/ls` 默认关闭，压缩和归档默认启用；归档复用 `read`。Memory 与历史检索扩展默认启用，分别增加 `memory_read` 及 `session_search/session_read`，不改变四基础工具的定位。`memory_update` 默认关闭，用户明确授权后随下次启动生效；Memory 关闭时不会单独发布写工具。Skills 默认关闭，启用并重启后扫描目录和发布目录投影。独立“记忆”页提供用户主动管理和历史原文查看，见[上下文与记忆架构](architecture/CONTEXT-MEMORY.zh-CN.md)。
 
 首版不提供动态库下载、插件市场或运行时热装卸。新增 Rust 能力仍由集成开发者接入并重新构建；部署者和最终用户只能选择该 Server 已经包含的能力。
 

@@ -32,7 +32,7 @@ Web 会话列表 / 继续对话
 
 ## 本地位置与格式
 
-默认位置：Windows `%LOCALAPPDATA%/mona-agent-core/sessions`；Unix `$XDG_STATE_HOME/mona-agent-core/sessions`，未设置时为 `$HOME/.local/state/mona-agent-core/sessions`。可通过可信宿主环境变量 `AGENT_SESSIONS_DIR` 覆盖。开发启动器的 `MONA_DEV_STATE_DIR` 同时隔离模型设置、能力状态、Spill 和会话；显式 `AGENT_SESSIONS_DIR` 优先。独立 `server --demo` 的默认目录为 `demo-sessions`；显式覆盖目录时由部署者负责隔离。
+默认位置：Windows `%LOCALAPPDATA%/mona-agent-core/sessions`；Unix `$XDG_STATE_HOME/mona-agent-core/sessions`，未设置时为 `$HOME/.local/state/mona-agent-core/sessions`。可通过可信宿主环境变量 `AGENT_SESSIONS_DIR` 覆盖。开发启动器的 `MONA_DEV_STATE_DIR` 同时隔离模型设置、能力状态、Spill 和会话；显式 `AGENT_SESSIONS_DIR` 优先。独立 `server --demo` 的默认目录为 `demo-sessions`。
 
 ```text
 sessions/
@@ -40,7 +40,7 @@ sessions/
   s-<创建请求ID>.jsonl
 ```
 
-每个文件严格包含两行 JSON。只支持当前格式 3，保存身份、不可变实际工作目录、通用有界组织 metadata、revision、导航标记、回合元数据、完整档案、工作前缀、最新检查点与可验证摘要。工作目录不是 Store 分组键，更换默认根不会隐藏旧历史。普通会话的独立工作目录与项目会话的共享目录规则见[工作区方案](WORKSPACES.zh-CN.md)。不读取或自动迁移旧格式；遇到旧哈希分组目录明确拒绝，不清空原数据。需要保留旧测试记录时，显式选择新的 `MONA_DEV_STATE_DIR` 或 `AGENT_SESSIONS_DIR`。完整档案不被摘要覆盖，新 Run 使用验证后的工作集，见[上下文管理](CONTEXT-MANAGEMENT.zh-CN.md)。
+每个文件严格包含两行 JSON。只支持当前格式（版本定义见[文档首页](README.zh-CN.md#协议与数据版本)），保存身份、不可变实际工作目录、通用有界组织 metadata、revision、导航标记、回合元数据、完整档案、工作前缀、最新检查点与可验证摘要。工作目录不是 Store 分组键，更换默认根不会隐藏当前格式历史。普通会话的独立工作目录与项目会话的共享目录规则见[应用层工作区接口](architecture/WEB.zh-CN.md)。Store 只扫描当前目录下的 `*.jsonl` 会话文件；其他目录不参与会话加载，不提供旧格式迁移或兼容逻辑。完整档案不被摘要覆盖，新 Run 使用验证后的工作集，见[上下文管理](CONTEXT-MANAGEMENT.zh-CN.md)。
 
 采用同目录临时文件、完整写入、文件同步、原子替换；Unix 还同步目录。读者只读取一代完整文件，不单独更新索引与正文。列表只读取有界首行，正文按会话、回合分页查询。每个宿主会话状态目录一个 OS 文件锁：同一存储目录的第二个写宿主启动失败，进程退出或崩溃后锁自动释放，不靠删除锁文件争抢写入。
 

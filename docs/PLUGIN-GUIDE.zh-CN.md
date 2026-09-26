@@ -10,7 +10,7 @@ Plugin 是组件接入 Runtime 的一种方式，不是所有组件的必需形�
 
 `Plugin` 包含三个方法：`manifest`、异步 `install`、异步 `shutdown`。
 
-Manifest 指定 id、api_version、requires、provides。requires/provides 是服务键，不是类名和文件路径。当前公共 API 协议号为 9；它与包版本 0.3.0 不是同一个值。包在 1.0 前仍可能调整 Rust 接口。
+Manifest 指定 id、api_version、requires、provides。requires/provides 是服务键，不是类名和文件路径。公共 API 协议号以 [`api::API_VERSION`](../packages/api/src/lib.rs) 为准；它与 Cargo 包版本不是同一个值。包在 1.0 前仍可能调整 Rust 接口。
 
 安装流程：
 
@@ -39,7 +39,7 @@ Manifest 指定 id、api_version、requires、provides。requires/provides 是�
 | `tool_selector` | `ToolSelector` | 在Run上限内选择本轮工具，同轮只能继续收紧 |
 | `checkpoint_sink` | `CheckpointSink` | 安装一个可等待的执行记录提交实现，不是UI观察器 |
 
-API 7 的目录、规则、记忆等注入组件应通过 `ContextTransform::sources` 返回唯一来源的 `ContextBlock`，普通 `transform` 处理真实对话。不要两处重复注入，或把来源伪装为最后一个用户请求。压缩策略仍属于独立组件，执行器只处理预算、时序与校验。计量、来源与恢复契约见[上下文管理](CONTEXT-MANAGEMENT.zh-CN.md)。
+目录、规则、记忆等注入组件应通过 `ContextTransform::sources` 返回唯一来源的 `ContextBlock`，普通 `transform` 处理真实对话。不要两处重复注入，或把来源伪装为最后一个用户请求。压缩策略仍属于独立组件，执行器只处理预算、时序与校验。计量、来源与恢复契约见[上下文管理](CONTEXT-MANAGEMENT.zh-CN.md)。
 
 会话、规则和 Skills 的独立接入分别见 [sessions](../packages/sessions/README.md)、[instructions](../packages/instructions/README.md)、[skills](../packages/skills/README.md)。普通接口先独立可用；会话 Sink 与运行收尾不依赖 Web，规则 Plugin 只注册同一实例的来源和派发策略。
 
@@ -115,11 +115,11 @@ EventObserver 是 best-effort：可能 lag，也可能在关闭时被取消。on
 
 宿主关闭会等待或终止本版创建的观察任务，以免插件资源关闭后还有 Core 管理的回调继续执行。插件私建的未管理任务不在这一保证之内。
 
-## 9. Memory 示例
+## 9. Memory 与历史检索
 
-MemoryBackend 是插件自己的扩展接口，可替换为数据库实现。示例 InMemoryStore 有容量上限；检索是简单键匹配／最近条目，不是 embedding 语义检索。
+`memory::Backend` 提供受限快照与原子批量维护；FileStore 保存 Markdown，InMemoryStore 只用于显式临时装配。具名 Binding 决定可读写范围，MemoryPlugin 通过既有 ContextTransform 稳定注入，不改写正式历史。`memory_update` 是副作用工具，仍需要宿主最终授权；不自动运行整理或自进化任务。
 
-ContextTransform 把记忆作为低信任参考加入投影；memory_remember 是需要显式宿主授权的写工具。没有自动持久化，也不会自动保存每一段对话。
+历史原文检索属于 `sessions/search`，SQLite 是可重建的派生索引，工具范围由宿主解析。两包不互相依赖，普通接口可脱离 Plugin/Web 复用。公共接口、容量和隔离见 [Memory](../packages/memory/README.md)、[Sessions](../packages/sessions/README.md) 及[记忆方案](architecture/CONTEXT-MEMORY.zh-CN.md)。
 
 ## 10. Planner 示例
 

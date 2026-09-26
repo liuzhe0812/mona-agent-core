@@ -12,7 +12,7 @@
 - Application `StreamFrame`：event、snapshot 或 fault。两种桥接传递相同内容。
 - Tauri 外包装：subscription_id、delivery_id、frame。delivery_id 只负责这个 Channel 的 ACK，**不是** Run 的回放游标。
 
-`API_VERSION=6` 是 Rust 插件接口的兼容检查；`STREAM_VERSION=2` 是 UI 协议版本；包版本是 0.3.0，`CHECKPOINT_VERSION=1` 属于独立的检查点协议。三个值相关但不是同一个概念。
+`API_VERSION=10` 是 Rust 插件接口的兼容检查；`STREAM_VERSION=2` 是 UI 协议版本；包版本是 0.3.0，`CHECKPOINT_VERSION=2` 属于独立的检查点协议。三个值相关但不是同一个概念。
 
 ## 3. 事件类型
 

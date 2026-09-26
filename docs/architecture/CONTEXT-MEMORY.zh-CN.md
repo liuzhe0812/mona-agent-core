@@ -2,7 +2,7 @@
 
 [文档首页](../README.zh-CN.md) · [核心执行](RUNTIME.zh-CN.md) · [扩展接入](EXTENSIONS.zh-CN.md)
 
-本文解释当前 Run、持久会话、压缩、精选长期记忆与历史检索怎样配合。这里的“三类记忆”是信息用途的划分，不是“核心层、扩展层、产品层”之外的三层软件架构。
+本文解释当前 Run、持久会话、压缩、精选长期记忆与历史检索怎样配合。这里的“三类记忆”是信息用途的划分，不是“核心层、扩展层、应用层”之外的三层软件架构。
 
 ## 1. 三类记忆及其所有者
 
@@ -136,6 +136,12 @@ Memory 普通接口为 `Backend::read` 与 `apply`，宿主通过 `Binding` 指�
 
 `instructions` 提供规则来源与写前变更检查；`skills` 提供可读的技能目录；`spill` 归档大结果并通过受授权的引用读取。它们均不属于 Memory 的存储职责。Spill 引用的可访问性还依赖归属和保留期限，不能因为摘要保留了 URI 就保证文件永久存在。
 
+`planner` 的临时计划也不是第四类长期记忆。当前 Run 通过 `planner.state` 来源获得精确步骤、进度、模式和提交方案；源成本在压缩前预留，旧计划工具轮次仍可摘要。跨 Run 的宿主从最新已确认检查点（包括可信 seed）或完整已确认计划工具记录恢复，再用 `bind_state` 附到新的工作历史；不能依赖摘要保留计划字段，也不能把搜索结果中的相同 JSON 当本会话状态。
+
+标准 Web 还将当前计划投影保存在 Sessions 的通用 `Body.state` 中。空闲模式变更和运行检查点分别通过受版本保护的接口写入同一个会话文件，接纳锁内再绑定下一 Run；可在没有新模型消息时可靠恢复用户选择。该状态不是模型历史或可直接公开的 HTTP 数据，完整产品路径见 [UI 模块与计划](WEB.zh-CN.md#ui-modules)。
+
+计划的已完成项是 Agent 的协作声明，不自动改写工具结算；检查点中的 Unknown 也不变成完成。仅在宿主选择恢复同一会话时接续，重启不会自动执行剩余步骤；不装配 Planner 不影响既有会话、摘要或长期记忆。接口见 [Planner](../../packages/planner/README.md)。
+
 ## 10. 不装配某项能力时
 
 | 装配 | 仍然具备 | 明确缺少 |
@@ -154,5 +160,6 @@ Memory 普通接口为 `Backend::read` 与 `apply`，宿主通过 `Binding` 指�
 | 压缩及结构化交接 | [`compaction/src/lib.rs`](../../packages/compaction/src/lib.rs)、[`summary.rs`](../../packages/compaction/src/summary.rs)、[`state.rs`](../../packages/compaction/src/state.rs) |
 | 会话事实与恢复 | [`sessions/src/store.rs`](../../packages/sessions/src/store.rs)、[`context.rs`](../../packages/sessions/src/context.rs)、[`lifecycle.rs`](../../packages/sessions/src/lifecycle.rs) |
 | Markdown 记忆与注入 | [`memory/src/store.rs`](../../packages/memory/src/store.rs)、[`plugin.rs`](../../packages/memory/src/plugin.rs) |
+| 临时计划与确切恢复 | [`planner/src/history.rs`](../../packages/planner/src/history.rs)、[`plugin.rs`](../../packages/planner/src/plugin.rs) |
 | 全文检索与原文读取 | [`sessions/src/search.rs`](../../packages/sessions/src/search.rs) |
 | 规则、Skills 与归档 | [`instructions/src`](../../packages/instructions/src)、[`skills/src`](../../packages/skills/src)、[`spill/src`](../../packages/spill/src) |

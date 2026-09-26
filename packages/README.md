@@ -2,7 +2,7 @@
 
 本页是可复用组件的统一入口：先了解每个包负责什么、何时接入，再通过链接查看具体用法。应用宿主与样例见 [Apps 与 Examples](../apps/README.md)，跨包依赖、执行机制和二次开发阅读路线见 [公开开发者文档](../docs/README.zh-CN.md)。
 
-包按核心层、扩展层和产品层（Web）组织：核心提供执行底座，扩展提供可复用能力，产品层负责装配与交互。组件可通过普通接口使用，也可通过薄 Plugin 接入宿主。
+包按核心层、扩展层和应用层组织：核心提供执行底座，扩展提供可复用能力，应用层负责宿主装配、传输与界面交互。组件可通过普通接口使用，也可通过薄 Plugin 接入宿主。
 
 ## 包目录
 
@@ -12,6 +12,7 @@
 | [runtime](runtime/README.md) | 唯一执行循环、模型网关、工具调度、累计历史与本轮请求预算、权限与生命周期 | 核心层，可独立嵌入；见 [核心执行机制](../docs/architecture/RUNTIME.zh-CN.md) |
 | [providers](providers/README.md) | Chat Completions / Responses / Messages、能力校验、鉴权及私有历史回传 | 宿主按模型协议选择；见 [模型适配契约](../docs/architecture/EXTENSIONS.zh-CN.md) |
 | [tools](tools/README.md) | 文件、命令和检索工具，以及可注入的流式输出归档接口 | 当前 Web 使用四工具默认组合；其他宿主按场景选择，沿用公共 `Tool` 接口 |
+| [sandbox](sandbox/README.md) | 本机文件副作用模式、原生受限进程与直接文件修改检查 | 不依赖 Agent/Core/UI；Tools 可选注入，正式 Web 默认工作区可写，不包含审批 |
 | [models](models/README.md) | 协议与供应商设置、凭据、模型能力、目录及固定运行路由 | 可选模型管理组件，由可信宿主接入 |
 | [sessions](sessions/README.md) | 持久会话、可靠检查点、工作集恢复、归档归属及可选 SQLite 历史检索 | 扩展层；不依赖 Application/HTTP/Runtime 实现，宿主提供目录与授权 |
 | [workspace](workspace/README.md) | 规范化工作目录、受根限制的目录列表和版本化文件预览 | 不依赖项目、会话或 Runtime；用户浏览不调用模型 |
@@ -25,7 +26,8 @@
 | [tauri-bridge](tauri-bridge/) | Tauri Command、Channel 与 ACK 适配 | 本机桌面接入，可与 HTTP 独立选择；见 [桥接与产品装配](../docs/architecture/WEB.zh-CN.md) |
 | [client](client/README.md) | JavaScript 协议客户端及 `RunView` 状态归并 | 不绑定 UI 框架 |
 | [memory](memory/README.md) | 精选长期 Markdown、受控批量维护与有界稳定注入 | 可独立装配，不依赖 Sessions 或自进化；见 [上下文与记忆架构](../docs/architecture/CONTEXT-MEMORY.zh-CN.md) |
-| [planner](planner/) | 通过已有执行接口进行上层任务编排 | 可选扩展；复用同一执行器，见 [扩展接入](../docs/architecture/EXTENSIONS.zh-CN.md) |
+| [planner](planner/README.md) | 单 Agent 计划、进度、仅规划模式与确切状态恢复 | 可选扩展；同一 Run 按需推进，宿主控制模式；标准 Web 通过独立产品模块接入，不把页面或审批放进本包 |
+| [subagent](subagent/README.md) | 可继续的异步子任务、消息、等待、停止与父子生命周期 | 可选扩展；复用 Runtime、Sessions 与共享任务预算，宿主绑定模型和工具上限；配套 Web 展示与配置 |
 
 Rust crate 名通常与目录一致；`tauri-bridge` 的 Cargo 包名为 `tauri-plugin-bridge`，工作区别名仍为 `tauri-bridge`。JavaScript 包名为 `client`。
 
@@ -33,6 +35,10 @@ Rust crate 名通常与目录一致；`tauri-bridge` 的 Cargo 包名为 `tauri-
 
 正式 Web 默认装配 Memory 和 Sessions 历史检索，Agent 自主写入工具默认关闭，可独立授权；用户管理入口位于“记忆”设置页。两种记忆独立关闭，不影响核心当前工作历史。
 
-正式 Server 的四个基础工具固定提供，三个检索工具按配置追加；Skills 默认关闭，compaction/spill 默认启用。项目规则 `instructions` 是默认启用、可关闭的独立扩展；上下文来源预算、压缩状态及会话归档之间的边界见[上下文与记忆](../docs/architecture/CONTEXT-MEMORY.zh-CN.md)。包本身的接口与正式宿主的装配策略分开维护，配置来源、覆盖规则和重启生效行为见 [产品层装配](../docs/architecture/WEB.zh-CN.md)。
+正式 Server 的四个基础工具固定提供，三个检索工具按配置追加；Skills 默认关闭，compaction/spill 默认启用。项目规则 `instructions` 是默认启用、可关闭的独立扩展；上下文来源预算、压缩状态及会话归档之间的边界见[上下文与记忆](../docs/architecture/CONTEXT-MEMORY.zh-CN.md)。包本身的接口与正式宿主的装配策略分开维护，配置来源、覆盖规则和重启生效行为见 [应用层装配](../docs/architecture/WEB.zh-CN.md)。
+
+正式 Web 默认装配本地 Sandbox；库的默认模式为只读，产品默认工作区可写。会话模式由输入框选择并由宿主保存；关闭组件不自动放开已要求沙箱的会话。原生插件、读取、联网及用户手动终端不因此成为受隔离资源。
+
+正式 Web 默认装配 Subagent，但普通任务不强制委派。角色、并发和深度由“子 Agent”设置配置，保存后重启生效；子记录由右侧面板查看，不混进顶层任务列表。子任务复用父任务工作区，未提供自动工作树或合并隔离。
 
 具体接口、配置、限额和错误语义见各包 README；尚无包内 README 的条目链接到源码目录及相关架构章节。

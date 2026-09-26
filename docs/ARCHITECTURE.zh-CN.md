@@ -8,6 +8,6 @@
 | [核心执行机制](architecture/RUNTIME.zh-CN.md) | 运行时序、模型网关、工具状态、预算、取消、审计和可靠提交 |
 | [上下文与三类记忆](architecture/CONTEXT-MEMORY.zh-CN.md) | 正式历史、模型投影、压缩、持久会话、长期记忆与原文检索 |
 | [扩展接口与装配](architecture/EXTENSIONS.zh-CN.md) | 普通接口、薄 Plugin、生命周期、权限与组合约束 |
-| [产品层与 Web 装配](architecture/WEB.zh-CN.md) | Server、Application、Bridge、Client 和界面之间的边界 |
+| [应用层与 Web/桌面装配](architecture/WEB.zh-CN.md) | Server、Application、Bridge、Client 和界面之间的边界 |
 
 本页只提供导航，不维护另一份按版本追加的架构正文。

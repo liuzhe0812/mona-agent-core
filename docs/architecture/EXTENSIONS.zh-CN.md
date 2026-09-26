@@ -69,7 +69,7 @@ Model 是原始适配器，接收 `ModelRequest`，输出 `ModelEvent` 流；应
 | `ToolDelta` | 按稳定 index 逐步形成 ID、名称和参数；参数是新增片段，完成前不可执行 |
 | `Reasoning` | 私有协议内容，不自动成为可展示的推理事件 |
 | `ProviderData` | 带命名空间的完整不透明快照，不是 JSON patch；保存顺序与对应身份 |
-| `Usage` | 当前请求的累计用量快照，不是逐次相加的 token 增量 |
+| `Usage` | 当前请求的累计用量快照；`input_tokens` 含缓存流量，缓存读写是可选分项，不是逐次相加的 token 增量 |
 | `Finish` + `End` | 区分模型结束原因与协议完成；TCP EOF 本身不能冒充成功 |
 | `validate_history` | 纯、有限的本地检查，不联网、不改写历史、不用它测试密钥 |
 | `context_window_tokens` | 只返回实际选择模型的已知窗口；未知返回 None |
@@ -102,10 +102,27 @@ content 是模型观察，不是自动安全的 UI 内容；structured 也不是
 | Compactor + Sessions | 同一 Compactor 导出状态，与对应 Store/Sink 一起确认 | 保存来自另一 Run 的摘要，或缓存清理后才尝试导出 |
 | Shell + Spill | 输出流与结果归档共用已装配后端，引用读取受宿主校验 | 创建两套读取规则不同的结果库；URI 存在就认为可以跨会话读取 |
 | Memory + 历史检索 | 独立作用域，普通工具和来源接口组合 | 强制把 Memory 与会话数据库捆绑；把搜索结果自动写成长期事实 |
+| Planner + Sessions/压缩 | 从已确认检查点恢复精确计划，以可信 seed 绑定新 Run；当前计划作为来源参与预算 | 从摘要或 UI 勾选恢复状态；把未确认的实时快照当已保存结果 |
 | 多个模型调用/子 Run | 复用 `RunContext.model` 或共享 `TaskControl` 的执行入口 | 每次构造新 Task 重置调用预算与总期限 |
 | 多个持久化目的地 | 外部协调后通过一个 Sink 声明成功条件 | 注册多个相互独立的 Sink，假定它们自动形成跨库事务 |
 
 `requires/provides` 解决服务依赖，不应被误当成任意运行回调优先级系统。来源在全部变换前集中收集，transform 按注册顺序执行；需要特定顺序时由组合根明确装配。
+
+### 同一 Agent 的计划管理
+
+`planner` 组合普通工具、上下文来源、工具选择器和派发策略，不包装执行器，不调用模型，不为每个步骤创建 Run。普通模式按需建立清单并推进；显式计划模式只提供获准的只读调研工具和计划工具。`plan_submit` 保存完整方案但不授予执行权；提交后同批其他调用仍经策略检查，不能借尚未刷新的工具列表继续操作。
+
+计划工具的结构化结果保存整份有界状态，并通过原有检查点确认。`live_snapshot` 只是暂态；恢复使用 `recover_checkpoint` 或完整已确认工具历史。宿主在新的用户轮次调用 `bind_state`，模式与精确计划不依赖摘要是否记住它们。已完成步骤不能被普通更新改写；修改剩余步骤必须说明原因，进度声明不替代业务验收。
+
+规划模式、审批与沙箱分别装配。标准 Web 已通过配套模块接入计划菜单与面板，未加入通用审批服务；宿主从最新持久版本出发处理确认、继续和修改，不允许模型自行切换。完整接口、正常/计划模式装配和限制见 [Planner](../../packages/planner/README.md)。
+
+### 子任务委派
+
+`subagent` 的 Service 管理父子身份、异步启动、消息、等待、停止与有界记录；Driver 由宿主提供现有 `AgentRuntime`、绑定模型和可信环境，薄 Binding/Plugin 只接入工具与生命周期。它不实现第二套 ReAct，也不依赖具体 Runtime、模型供应商或 Web。可直接移植的 Codex 并发许可代码保留固定提交、原许可证与修改说明，未引入整个 `codex-core`。
+
+子任务通过 `TaskControl::branch` 共享总模型额度和期限、独立取消，使用自己的 Session/Turn 保存确认记录。工具集合始终与父任务当前实际集合相交；角色配置不能扩大授权，父计划与沙箱不能借委派绕过。fork 取模型调用前的已配对工作快照，independent 不继承父对话；两者仍受原历史兼容性、容量、模型预算和取消检查。
+
+消息投递只保存信息，不启动空闲子任务；后续任务在同一子会话建立明确的新轮次。等待超时不取消子任务，终态必须等待原有可靠保存。父任务结束时排空所属后代，重启只恢复记录，不重跑未知副作用。完整接入、默认角色与容量见 [Subagent](../../packages/subagent/README.md)。
 
 ## 7. 包装 AgentRuntime 的要求
 
@@ -114,8 +131,6 @@ content 是模型观察，不是自动安全的 UI 内容；structured 也不是
 包装器转发纯 `validate_history`，实际 start 针对绑定模型再检查。`execute` 使用 `RunHandle::wait_owned()` 保留拥有者取消语义；普通 `start`/`wait` 观察者断开不取消任务。运行配置和资源租约要活到已有任务真正结束，不能随一次 HTTP 请求或页面视图销毁。
 
 需要持久会话时，使用可信会话身份；需要临时旁支时，不要伪装为父会话的同一个写入轮次。历史读取权、会话写入身份和工作目录是三个不同概念。
-
-当前 Planner 通过 `AgentExecutor` 先生成有限计划，再顺序执行步骤；各次执行共享 Task，但没有复合事件流、自动重规划或完整父子任务产品协议。二次开发不能仅因它有 Plugin 入口就假定这些行为已存在。
 
 ## 8. 扩展完成前应验证什么
 
@@ -132,5 +147,5 @@ content 是模型观察，不是自动安全的 UI 内容；structured 也不是
 | 模型与工具执行边界 | [`runtime/model.rs`](../../packages/runtime/src/model.rs)、[`tools.rs`](../../packages/runtime/src/tools.rs) |
 | 普通接口与 Plugin 组合 | [`memory/src`](../../packages/memory/src)、[`instructions/src`](../../packages/instructions/src) |
 | 会话/模型包装 | [`sessions/lifecycle.rs`](../../packages/sessions/src/lifecycle.rs)、[`models/lib.rs`](../../packages/models/src/lib.rs) |
-| 上层编排 | [`planner/src/lib.rs`](../../packages/planner/src/lib.rs) |
+| 计划状态、接入与恢复 | [`planner/state.rs`](../../packages/planner/src/state.rs)、[`plugin.rs`](../../packages/planner/src/plugin.rs)、[`history.rs`](../../packages/planner/src/history.rs) |
 | 可运行的接口组合 | [`generic_extensions.rs`](../../examples/demo/src/bin/generic_extensions.rs)、[`memory.rs`](../../examples/demo/src/bin/memory.rs) |
