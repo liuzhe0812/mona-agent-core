@@ -210,11 +210,11 @@
 | `packages/models/src/storage.rs` | `save_overwrites_previous_settings` | 已通过 |
 | `packages/models/src/storage.rs` | `oversized_settings_are_rejected` | 已通过 |
 | `packages/models/src/storage.rs` | `short_key_material_is_rejected` | 已通过 |
-| `apps/server/tests/model_settings.rs` | `management_routes_require_bearer_authentication` | 已通过 |
-| `apps/server/tests/model_settings.rs` | `management_rejects_unknown_fields_and_does_not_return_api_keys` | 已通过 |
-| `apps/server/tests/model_settings.rs` | `management_uses_revision_conflicts_and_controls_default_visibility_and_delete` | 已通过 |
-| `apps/server/tests/model_settings.rs` | `new_runs_use_the_current_default_model` | 已通过 |
-| `apps/server/tests/model_settings.rs` | `changing_default_during_a_tool_run_does_not_change_its_next_round` | 已通过 |
+| `apps/server/src/model_settings_tests.rs` | `management_routes_require_bearer_authentication` | 已通过 |
+| `apps/server/src/model_settings_tests.rs` | `management_rejects_unknown_fields_and_does_not_return_api_keys` | 已通过 |
+| `apps/server/src/model_settings_tests.rs` | `management_uses_revision_conflicts_and_controls_default_visibility_and_delete` | 已通过 |
+| `apps/server/src/model_settings_tests.rs` | `new_runs_use_the_current_default_model` | 已通过 |
+| `apps/server/src/model_settings_tests.rs` | `changing_default_during_a_tool_run_does_not_change_its_next_round` | 已通过 |
 
 ## Agent 能力管理验证
 
