@@ -53,7 +53,10 @@ test('project writes carry revisions and files retain explicit version conflicts
   try {
     await client.addProject({ request_id:'first', revision:1, name:'Project', path:'/work' });
     assert.deepEqual(JSON.parse(calls[0].options.body),{request_id:'first',revision:1,name:'Project',path:'/work'});
-    await client.removeProject('p-one',2);assert.equal(calls[1].options.method,'POST');
+    await client.createProject('named',2,'新项目');
+    assert.equal(new URL(calls[1].url).pathname,'/api/projects/create');
+    assert.deepEqual(JSON.parse(calls[1].options.body),{request_id:'named',revision:2,name:'新项目'});
+    await client.removeProject('p-one',2);assert.equal(calls[2].options.method,'POST');
     globalThis.fetch = async () => Response.json({code:'conflict',message:'changed'}, {status:409});
     await assert.rejects(() => client.read('s-one','a',{revision:'old'}),e=>e.status===409&&e.code==='conflict');
   } finally {client.clear();globalThis.fetch=original;}

@@ -105,12 +105,12 @@ try {
     tokens.control === '36px' && tokens.sidebar === '232px' && tokens.radius === 12 && tokens.gutter === 32);
   const mainMetrics = await evaluate(`(() => {const box=s=>document.querySelector(s).getBoundingClientRect();const css=s=>getComputedStyle(document.querySelector(s));return {
     topbar:box('.topbar').height,newTask:box('#new-chat').height,icon:box('#search-button').width,send:box('#send').width,
-    composerRadius:css('.composer').borderRadius,workspaceRadius:css('.workspace').borderRadius,suggestion:box('.suggestions button').height,
+    composerRadius:css('.composer').borderRadius,workspaceRadius:css('.workspace').borderRadius,suggestions:document.querySelectorAll('.suggestions,[data-prompt]').length,
     workspaceShadow:css('.workspace').boxShadow
   };})()`);
   check('main chrome uses the compact component contract', mainMetrics.topbar === 48 && mainMetrics.newTask === 36
-    && mainMetrics.icon === 32 && mainMetrics.send === 32 && mainMetrics.composerRadius === '12px'
-    && mainMetrics.workspaceRadius === '12px' && mainMetrics.suggestion <= 80 && mainMetrics.workspaceShadow === 'none');
+    && mainMetrics.icon === 32 && mainMetrics.send === 34 && mainMetrics.composerRadius === '22px'
+    && mainMetrics.workspaceRadius === '12px' && mainMetrics.suggestions === 0 && mainMetrics.workspaceShadow === 'none');
   await screenshot('main-light');
 
   await hover('#sessions-options');
@@ -222,12 +222,17 @@ try {
   await click('#settings-back');
   await evaluate("(() => {const p=document.querySelector('#prompt');p.value='设计系统浏览器验收';p.dispatchEvent(new Event('input',{bubbles:true}));})()");
   await click('#send');
-  await waitPage("document.querySelector('.activity-summary')", 'activity row rendered', 12000);
+  await waitPage("document.querySelector('.activity-item:not(.kind-message) > .activity-summary')", 'tool activity row rendered', 12000);
+  await evaluate("document.querySelectorAll('.execution-process,.activity-group').forEach(node=>node.open=true)");
   const chatMetrics = await evaluate(`(() => {const box=s=>document.querySelector(s).getBoundingClientRect();const css=s=>getComputedStyle(document.querySelector(s));return {
-    userFont:css('.user-message').fontSize,userRadius:css('.user-message').borderTopLeftRadius,
-    process:box('.execution-summary').height,activity:box('.activity-summary').height,detailRadius:getComputedStyle(document.querySelector('.activity-summary')).borderRadius
+    userFont:css('.user-message').fontSize,userLine:css('.user-message').lineHeight,userRadius:css('.user-message').borderTopLeftRadius,
+    assistantFont:css('.message-text').fontSize,assistantLine:css('.message-text').lineHeight,
+    composerFont:css('#prompt').fontSize,composerLine:css('#prompt').lineHeight,
+    process:box('.execution-summary').height,activity:box('.activity-item:not(.kind-message) > .activity-summary').height,detailRadius:getComputedStyle(document.querySelector('.activity-item:not(.kind-message) > .activity-summary')).borderRadius
   };})()`);
-  check('chat and execution rows consume the shared typography and compact activity geometry', chatMetrics.userFont === '15px'
+  check('chat and execution rows consume the shared typography and compact activity geometry', chatMetrics.userFont === '14px'
+    && chatMetrics.userLine === '22px' && chatMetrics.assistantFont === '14px' && chatMetrics.assistantLine === '24.5px'
+    && chatMetrics.composerFont === '14px' && chatMetrics.composerLine === '24px'
     && chatMetrics.userRadius === '12px' && chatMetrics.process === 32 && chatMetrics.activity === 28 && chatMetrics.detailRadius === '8px');
   await screenshot('chat-running-dark');
   await waitPage("document.querySelector('#cancel').hidden", 'fixture task settled', 12000);
@@ -236,22 +241,25 @@ try {
   await waitPage("document.querySelectorAll('#timeline .turn').length===2", 'second conversation turn rendered', 12000);
   await waitPage("[...document.querySelectorAll('#timeline .turn')].at(-1)?.querySelector('.assistant-body > .message-text h1')?.textContent==='富内容渲染'", 'renderer answer settled', 12000);
   await waitPage("document.querySelector('#cancel').hidden", 'second fixture task settled', 12000);
+  await evaluate("(() => {const turn=[...document.querySelectorAll('#timeline .turn')].at(-1);turn.querySelector('.execution-process').open=true;turn.querySelectorAll('.activity-group,.activity-item').forEach(node=>node.open=true);})()");
+  await waitPage("[...document.querySelectorAll('#timeline .turn')].at(-1).querySelector('.hljs-keyword') && [...document.querySelectorAll('#timeline .turn')].at(-1).querySelector('img.message-mermaid')?.naturalWidth>0", 'completed syntax and real diagram rendering', 30000);
+  await waitPage("[...document.querySelectorAll('#timeline .turn')].at(-1).querySelector('.structured-diff .diff-add .diff-code')?.textContent==='+new_value'", 'lazy tool diff renderer');
   const renderer = await evaluate(`(() => {
     const turn=[...document.querySelectorAll('#timeline .turn')].at(-1);
     const answer=turn.querySelector('.assistant-body > .message-text');
     return {
       codeLanguage:answer.querySelector('.message-code-language')?.textContent,
       codeCollapsed:answer.querySelector('.message-code-block')?.classList.contains('is-collapsed'),
-      highlighted:Boolean(answer.querySelector('.token-keyword')),
+      highlighted:Boolean(answer.querySelector('.hljs-keyword')),
       tasks:answer.querySelectorAll('.message-task-checkbox').length,
       checked:Boolean(answer.querySelector('.message-task-checkbox:checked')),
-      math:Boolean(answer.querySelector('math.message-math')),
-      mermaid:Boolean(answer.querySelector('.message-mermaid .mermaid-node')),
+      math:Boolean(answer.querySelector('.katex math')),
+      mermaid:Boolean(answer.querySelector('img.message-mermaid')?.naturalWidth),
       escapedTable:[...answer.querySelectorAll('.message-table td')].some(node=>node.textContent==='A|B'),
       autoLink:Boolean(answer.querySelector('a[href="https://example.com/docs"]')),
-      rawHtmlSafe:answer.textContent.includes('<img src=x onerror=alert(1)>') && !answer.querySelector('img'),
+      rawHtmlSafe:answer.textContent.includes('<img src=x onerror=alert(1)>') && !answer.querySelector('img[src="x"]'),
       richImage:Boolean(turn.querySelector('.rich-content img[src^="data:image/png;base64,"]')),
-      diff:Boolean(turn.querySelector('.structured-diff .token-add')),
+      diff:turn.querySelector('.structured-diff .diff-add .diff-code')?.textContent==='+new_value' && turn.querySelector('.structured-diff .diff-delete .diff-code')?.textContent==='-old_value',
       artifacts:turn.querySelectorAll('.artifact-viewer').length,
       fallbackMeta:[...turn.querySelectorAll('.structured-json summary')].some(node=>node.textContent.includes('fixture.meta')),
     };
@@ -262,8 +270,8 @@ try {
   check('conversation renderer covers math and Mermaid diagrams', renderer.math && renderer.mermaid);
   check('tool rendering covers rich images, registered diff details, safe JSON fallback and artifact cards',
     renderer.richImage && renderer.diff && renderer.artifacts >= 2 && renderer.fallbackMeta);
-  await evaluate("(() => {const turn=[...document.querySelectorAll('#timeline .turn')].at(-1);turn.querySelector('.code-expand').click();})()");
-  check('long code blocks can be expanded without replacing the conversation', await evaluate("![...document.querySelectorAll('#timeline .turn')].at(-1).querySelector('.message-code-block').classList.contains('is-collapsed')"));
+  await evaluate("(() => {const turn=[...document.querySelectorAll('#timeline .turn')].at(-1);turn.querySelector('.assistant-body > .message-text .code-expand').click();})()");
+  check('long code blocks can be expanded without replacing the conversation', await evaluate("![...document.querySelectorAll('#timeline .turn')].at(-1).querySelector('.assistant-body > .message-text .message-code-block').classList.contains('is-collapsed')"));
   await evaluate("(() => {const turn=[...document.querySelectorAll('#timeline .turn')].at(-1);[...turn.querySelectorAll('.artifact-viewer button')].find(node=>node.textContent==='读取内容')?.click();})()");
   await waitPage("[...document.querySelectorAll('#timeline .turn')].at(-1).querySelector('.artifact-output:not([hidden])')?.textContent.includes('fixture')", 'artifact viewer loaded a trusted page');
   check('artifact viewer pages complete retained content through the authenticated host', true);

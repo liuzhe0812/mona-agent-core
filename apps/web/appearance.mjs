@@ -31,7 +31,7 @@ export function mountAppearance(root = document, manager = browserTheme) {
     choice.append(input, element('span', '', label)); modes.append(choice); modeInputs.set(value, input);
     on(input, 'change', () => { if (input.checked) manager.update({ mode: value }); });
   }
-  for (const value of FONT_SIZES) { const option = element('option', '', `${value} px${value === 15 ? ' · 默认' : ''}`); option.value = String(value); size.append(option); }
+  for (const value of FONT_SIZES) { const option = element('option', '', `${value} px${value === 14 ? ' · 默认' : ''}`); option.value = String(value); size.append(option); }
   for (const [value, label] of Object.entries(SHAPES)) { const option = element('option', '', label); option.value = value; shape.append(option); }
   function createCard(item) {
     const label = element('label', 'theme-card');

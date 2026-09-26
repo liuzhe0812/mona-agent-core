@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { previewText, railVisualState } from './conversation-rail.mjs';
+import { catalog } from './ui/catalog.mjs';
 
 test('turn navigator builds the same peak, near and mid interaction curve', () => {
   assert.deepEqual(railVisualState(4), { tone: 'idle', opacity: .58, scaleX: 1 });
@@ -16,4 +18,13 @@ test('turn navigator previews normalize whitespace, keep two paragraphs and cap 
   assert.equal(long.length, 220);
   assert.ok(long.endsWith('...'));
   assert.equal(previewText('', '回退'), '回退');
+});
+
+test('turn navigator is owned by the local UI module lifecycle', async () => {
+  assert.equal(catalog['conversation-rail'].local, true);
+  const module = await catalog['conversation-rail'].load();
+  assert.equal(module.version, 1);
+  assert.equal(typeof module.mount, 'function');
+  const app = await readFile(new URL('./app.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(app, /import\s+['"]\.\/conversation-rail\.mjs['"]/);
 });

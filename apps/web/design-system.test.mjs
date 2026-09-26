@@ -23,7 +23,10 @@ test('the gate rejects raw colors, arbitrary type, radius and motion in feature 
 test('the gate rejects unregistered runtime inline styles and accepts the bounded layout hooks', () => {
   assert.ok(auditRuntimeJs("node.style.background = '#fff';", 'apps/web/app.mjs')
     .some(item => item.message.includes('inline styles')));
-  assert.deepEqual(auditRuntimeJs("shell.style.setProperty('--sidebar-width', `${sidebarWidth}px`);", 'apps/web/app.mjs'), []);
+  const sidebarHook = "if (this.shell.style.getPropertyValue('--sidebar-width') !== width) this.shell.style.setProperty('--sidebar-width', width);";
+  assert.deepEqual(auditRuntimeJs(sidebarHook, 'apps/web/shell-layout.mjs'), []);
+  assert.ok(auditRuntimeJs(sidebarHook, 'apps/web/app.mjs').length > 0);
+  assert.deepEqual(auditRuntimeJs("if (this.composer.style.getPropertyValue('--composer-draft-height') !== desired) this.composer.style.setProperty('--composer-draft-height', desired);", 'apps/web/shell-layout.mjs'), []);
   assert.deepEqual(auditRuntimeJs("menu.style.left = `${x}px`;", 'apps/web/sessions-ui.mjs'), []);
 });
 

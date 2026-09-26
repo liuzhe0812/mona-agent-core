@@ -5,16 +5,26 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
-const FEATURE_CSS = ['apps/web/styles.css', 'apps/web/sessions.css', 'apps/web/appearance.css', 'apps/web/workspace.css', 'apps/web/memory.css'];
+const FEATURE_CSS = ['apps/web/styles.css', 'apps/web/sessions.css', 'apps/web/appearance.css', 'apps/web/workspace.css', 'apps/web/memory.css', 'apps/web/conversation.css', 'apps/web/ui/extensions.css'];
 const OWNERSHIP_ROOTS = ['apps/web', 'docs/ui'];
 const OWNERSHIP_TEXT_EXTENSIONS = new Set(['.css', '.html', '.js', '.json', '.md', '.mjs', '.toml', '.ts', '.txt', '.yaml', '.yml']);
 const LEGACY_EXTERNAL_NAME = ['cin', 'dy'].join('');
 const RUNTIME_JS = [
+  'apps/web/layout-geometry.mjs', 'apps/web/shell-layout.mjs', 'apps/web/overlay-scope.mjs',
+  'apps/web/pane-layout.mjs', 'apps/web/pane-controls.mjs',
+  'apps/web/process-scroll.mjs',
+  'apps/web/conversation-policy.mjs', 'apps/web/conversation-metrics.mjs', 'apps/web/workspace-files.mjs',
+  'apps/web/conversation-find.mjs', 'apps/web/diff-view.mjs',
+  'apps/web/pane-state.mjs',
+  'apps/web/file-reference-cards.mjs',
+  'apps/web/content-dom.mjs', 'apps/web/diagram-view.mjs', 'apps/web/conversation-controls.mjs', 'apps/web/presentation-path.mjs',
   'apps/web/pane-icons.mjs', 'apps/web/file-preview.mjs', 'apps/web/workbench-ui.mjs',
   'apps/web/app.mjs', 'apps/web/appearance.mjs', 'apps/web/theme.mjs',
   'apps/web/run-view.mjs', 'apps/web/content-renderer.mjs', 'apps/web/sessions-ui.mjs', 'apps/web/tooltip.mjs',
   'apps/web/conversation-rail.mjs', 'apps/web/workspace-ui.mjs', 'apps/web/right-pane.mjs', 'apps/web/side-conversation.mjs',
   'apps/web/memory-ui.mjs',
+  ...['registry','host','client','shell','commands','command-menu','dom','catalog','plan-view','subagent-view'].map(id => `apps/web/ui/${id}.mjs`),
+  ...['models','capabilities','appearance','memory','workspace','workbench','side','metrics','details','planner','sandbox','subagent'].map(id => `apps/web/ui/modules/${id}.mjs`),
 ];
 const REQUIRED_DECLARATIONS = Object.freeze({
   '--ui-control-sm': '32px', '--ui-control-md': '36px', '--ui-control-lg': '40px',
@@ -24,8 +34,20 @@ const REQUIRED_DECLARATIONS = Object.freeze({
   '--ui-list-row-height': '52px', '--ui-provider-sidebar-width': '240px',
 });
 const RUNTIME_STYLE_ALLOW = Object.freeze({
-  'apps/web/app.mjs': [
-    /^shell\.style\.setProperty\('--sidebar-width', `\$\{sidebarWidth\}px`\);$/,
+  'apps/web/ui/command-menu.mjs': [
+    /^this\.root\.style\.setProperty\('--composer-menu-width', `\$\{width\}px`\);$/,
+    /^this\.root\.style\.setProperty\('--composer-menu-height', `\$\{Math\.max\(0, height\)\}px`\);$/,
+    /^this\.root\.style\.setProperty\('--pane-menu-[xy]', `\$\{Math\.round\([xy]\)\}px`\);$/,
+  ],
+  'apps/web/pane-controls.mjs': [
+    /^this\.root\.style\.setProperty\('--pane-menu-[xy]', `\$\{Math\.round\([xy]\)\}px`\);$/,
+  ],  'apps/web/conversation-controls.mjs': [
+    /^main\.parentElement\.style\.setProperty\('--conversation-dock-height', `\$\{height\}px`\);$/,
+  ],
+  'apps/web/shell-layout.mjs': [
+    /^if \(this\.shell\.style\.getPropertyValue\('--sidebar-width'\) !== width\) this\.shell\.style\.setProperty\('--sidebar-width', width\);$/,
+    /^if \(this\.workspace\.style\.getPropertyValue\('--conversation-scrollbar-width'\) !== scrollbar\) this\.workspace\.style\.setProperty\('--conversation-scrollbar-width', scrollbar\);$/,
+    /^if \(this\.composer\.style\.getPropertyValue\('--composer-draft-height'\) !== desired\) this\.composer\.style\.setProperty\('--composer-draft-height', desired\);$/,
   ],
   'apps/web/theme.mjs': [
     /^for \(const key of PALETTE_KEYS\) element\.style\.setProperty\(`--\$\{key\}`, palette\[key\]\);$/,
@@ -40,17 +62,25 @@ const RUNTIME_STYLE_ALLOW = Object.freeze({
   'apps/web/sessions-ui.mjs': [
     /^menu\.style\.(?:left|top) = /,
   ],
+  'apps/web/workspace-ui.mjs': [
+    /^this\.projectMenu\.style\.(?:left|top) = /,
+  ],
   'apps/web/right-pane.mjs': [
-    /^this\.shell\.style\.setProperty\('--right-pane-width', `\$\{this\.width\}px`\);$/,
+    /^this\.pane\.style\.setProperty\('--right-split-first', `\$\{ratio\}fr`\);$/,
+    /^this\.pane\.style\.setProperty\('--right-split-last', `\$\{100 - ratio\}fr`\);$/,
+    /^if \(this\.shell\.style\.getPropertyValue\('--right-pane-width'\) !== width\) this\.shell\.style\.setProperty\('--right-pane-width', width\);$/,
   ],
   'apps/web/conversation-rail.mjs': [
     /^preview\.style\.top = `\$\{top\}px`;$/,
   ],
 });
 const RUNTIME_LAYOUT_MARKERS = Object.freeze({
-  'apps/web/app.mjs': [
+  'apps/web/ui/command-menu.mjs': [
+    'const COMMAND_MENU_GAP = 4;', 'const COMMAND_MENU_EDGE = 12;', 'const COMMAND_MENU_MAX_HEIGHT = 400;',
+  ],
+  'apps/web/layout-geometry.mjs': [
     'const SIDEBAR_MIN_WIDTH = 208;', 'const SIDEBAR_MAX_WIDTH = 460;',
-    'const SIDEBAR_DEFAULT_WIDTH = 264;', 'const SIDEBAR_KEYBOARD_STEP = 16;',
+    'const SIDEBAR_DEFAULT_WIDTH = 264;', 'const SIDEBAR_KEYBOARD_STEP = 16;', 'const CENTER_MIN_WIDTH = 400;',
   ],
   'apps/web/sessions-ui.mjs': [
     'const SESSION_MENU_VIEWPORT_GUTTER = 8;', 'const SESSION_MENU_ANCHOR_GAP = 4;',
@@ -115,7 +145,7 @@ export function auditFeatureCss(source, file = '<css>') {
   }
   for (const match of clean.matchAll(/box-shadow\s*:\s*([^;}]*)/gi)) {
     const value = match[1];
-    if (!/var\(--(?:focus-ring-soft|ui-shadow-hover-card)\)/.test(value) && !/^\s*none\s*$/i.test(value)) {
+    if (!/var\(--(?:focus-ring-soft|ui-shadow-hover-card|ui-shadow-composer)\)/.test(value) && !/^\s*none\s*$/i.test(value)) {
       violations.push(violation(file, clean, match, 'Ad-hoc elevation shadows are forbidden; only the shared focus indicator is allowed in formal feature CSS.'));
     }
   }

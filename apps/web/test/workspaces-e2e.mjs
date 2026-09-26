@@ -76,10 +76,19 @@ async function send(method, params = {}) { return new Promise((resolve, reject) 
 async function evaluate(expression) { const v = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (v.exceptionDetails) throw new Error(v.exceptionDetails.exception?.description || 'page failed'); return v.result.value; }
 const waitPage = (expression, name) => waitFor(() => evaluate(expression), name);
 async function click(selector) {
+  if (selector.startsWith('.file-entry')) {
+    if (!await evaluate("Boolean(document.querySelector('.workspace-files:not([hidden])'))")) await click('#workspace-files-open');
+    selector = '#right-content > .workspace-files:not([hidden]) ' + selector;
+    await waitPage(`Boolean(document.querySelector(${JSON.stringify(selector)}))`, 'visible file page control');
+  }
   const point = await evaluate(`(() => {const n=document.querySelector(${JSON.stringify(selector)});if(!n)throw new Error('missing element');n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
+}
+async function hover(selector) {
+  const point = await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
 }
 async function fill(selector, value) { await evaluate(`(() => {const n=document.querySelector(${JSON.stringify(selector)});n.value=${JSON.stringify(value)};n.dispatchEvent(new Event('input',{bubbles:true}));})()`); }
 async function shot(name) { const v = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(join(output, name + '.png'), Buffer.from(v.data, 'base64')); }
@@ -96,7 +105,7 @@ async function launchBrowser(origin, session) {
   await send('Page.navigate',{url:`${origin}/#session=${session}`});
   await waitPage("!document.querySelector('#workspace-files-open').hidden && !document.querySelector('#sessions-refresh').disabled",'workspace UI ready');
   await click('#workspace-files-open');
-  await waitPage("document.querySelector('#workspace-path')?.textContent.length>0",'workspace files ready');
+  await waitPage("document.querySelector('.workspace-files-path')?.textContent.length>0",'workspace files ready');
 }
 try {
   ui=await startUiServer({host:'127.0.0.1',port:0,endpoint,token});const origin=`http://127.0.0.1:${ui.address().port}`;
@@ -171,7 +180,7 @@ try {
   await writeFile(join(a.workspace,'pixel.png'),Buffer.from(png,'base64'));
   if(process.env.MONA_TEST_SKIP_BROWSER!=='1'){
     await launchBrowser(origin,a.id);
-    check('workspace file view follows the selected persisted session',await evaluate(`document.querySelector('#workspace-path').textContent===${JSON.stringify(a.workspace)}`));
+    check('workspace file view follows the selected persisted session',await evaluate(`document.querySelector('.workspace-files-path').textContent===${JSON.stringify(a.workspace)}`));
     await waitPage("document.querySelector('.file-entry[data-path=\"result.txt\"]')",'files listed');await click('.file-entry[data-path="result.txt"]');
     await waitPage("document.querySelector('#right-content > :not([hidden])').textContent.includes('ORDINARY_A_CHANGED')",'text preview');
     check('real file preview appears without sending another Agent task',await evaluate("document.querySelector('.workspace-source-preview code')!==null"));
@@ -184,7 +193,6 @@ try {
     await click('.file-entry[data-path="long.txt"]');await waitPage("!document.querySelector('#right-content > :not([hidden]) .right-file-more').hidden",'long file page');
     const textLength=await evaluate("document.querySelector('#right-content > :not([hidden]) code').textContent.length");await click('#right-content > :not([hidden]) .right-file-more');
     await waitPage(`document.querySelector('#right-content > :not([hidden]) code').textContent.length>${textLength}`,'next text page');check('long files are paged instead of loading an unlimited response',true);
-    await click('#files-back-tasks');
     await click('#settings-button');await click('#settings-workspace-tab');
     await waitPage(`!document.querySelector('#workspace-root').disabled && document.querySelector('#workspace-root').value===${JSON.stringify(changed.default_root)}`,'workspace settings');
     await fill('#workspace-root',projectTwo);await click('#workspace-root-save');await waitPage("document.querySelector('#workspace-notice').textContent.includes('已保存')",'root saved from real form');
@@ -192,13 +200,116 @@ try {
     await click('#settings-appearance-tab');await click('label.theme-mode:has(#theme-mode-dark)');await waitPage("document.documentElement.dataset.theme==='dark'",'dark theme applied');await click('#settings-back');await shot('workspace-dark');
     await click('#files-close');check('right pane can be collapsed without changing the session',await evaluate("document.querySelector('#files-panel').hidden && location.hash.includes('ordinary-a')"));
     if(!noProjects){
-      await click('#project-add');await fill('#project-path',join(a.workspace,'docs'));await fill('#project-name','UI Project');await click('#project-save');
-      await waitPage("!document.querySelector('#project-dialog').open && document.querySelector('#project-list').textContent.includes('UI Project')",'project UI registration');
-      check('project registration has a real persistent UI path', (await request('/api/projects')).projects.some(p=>p.name==='UI Project'));
-      const id=(await request('/api/projects')).projects.find(p=>p.name==='UI Project').id;
-      await click(`.project-item[data-project-id="${id}"] .project-row`);await waitPage("document.querySelector('#project-context').textContent==='UI Project'",'project selected');
+      const realNameCreate = (await request('/api/workspace-settings')).project_create_mode === 'name';
+      if(!realNameCreate){
+        // Older fixture binaries only support explicit paths; the browser form still gets covered.
+        await evaluate(`(async()=>{const {WorkspaceUI}=await import('/apps/web/workspace-ui.mjs');const {WorkspaceClient}=await import('/apps/web/workspace.mjs');const apply=WorkspaceUI.prototype.applySettings;WorkspaceUI.prototype.applySettings=function(value){return apply.call(this,{...value,project_create_mode:'name'})};WorkspaceClient.prototype.createProject=function(requestId,revision,name){return this.addProject({request_id:requestId,revision,name,path:${JSON.stringify(join(a.workspace,'docs'))}})}})()`);
+        await click('#settings-button');await click('#settings-workspace-tab');await click('#workspace-settings-refresh');await click('#settings-back');
+      }
+      await waitPage("!document.querySelector('#project-add').disabled",'name creation available');
+      await click('#project-add');await waitPage("document.querySelector('#project-dialog').open",'project name dialog');
+      check('web project form asks only for a name',await evaluate("!!document.querySelector('#project-name')&&!document.querySelector('#project-path')"));
+      await fill('#project-name','UI Project');await click('#project-save');
+      await waitPage("document.querySelector('#project-list').textContent.includes('UI Project')",'project UI registration');
+      check('name creation registers a real project', (await request('/api/projects')).projects.some(p=>p.name==='UI Project'));
+      const uiProject=(await request('/api/projects')).projects.find(p=>p.name==='UI Project');
+      const id=uiProject.id;
+      if(realNameCreate) check('Web creates the named directory under the saved default root',normalizePath(uiProject.path)===normalizePath(join(projectTwo,'UI Project')));
+      check('project navigation matches the reference controls without a file button or status log',await evaluate("(()=>{const heading=document.querySelector('.projects-heading'),group=[...document.querySelectorAll('.project-group')].find(item=>item.querySelector('.project-row')?.textContent.includes('UI Project'));return heading.querySelector('#projects-collapse')?.getAttribute('aria-expanded')==='true'&&heading.querySelector('#projects-sort')&&heading.querySelector('#project-add')&&group?.querySelector('.project-options')&&group?.querySelector('.project-new')&&!group?.querySelector('.project-files')&&!document.querySelector('#chat-sidebar #projects-notice')})()"));
+      check('project and task headers align at both edges and expose matching section grips',await evaluate("(()=>{const p=document.querySelector('#projects-collapse span').getBoundingClientRect(),t=document.querySelector('#sessions-section-title').getBoundingClientRect(),pa=document.querySelector('#project-add').getBoundingClientRect(),ta=document.querySelector('#sessions-new').getBoundingClientRect();return Math.abs(p.left-t.left)<1&&Math.abs(pa.right-ta.right)<1&&document.querySelector('#projects-sort').draggable&&document.querySelector('#sessions-options').draggable&&document.querySelector('#projects-sort svg').innerHTML===document.querySelector('#sessions-options svg').innerHTML})()"));
+      await evaluate("(()=>{const source=document.querySelector('#projects-sort'),target=document.querySelector('.sessions-heading'),transfer=new DataTransfer();source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer}));target.dispatchEvent(new DragEvent('dragover',{bubbles:true,dataTransfer:transfer}));target.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:transfer}));source.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:transfer}));})()");
+      check('dragging a section grip swaps project and task sections and saves their order',await evaluate("document.querySelector('.sidebar-navigation').firstElementChild.classList.contains('sessions-region')&&JSON.stringify(JSON.parse(localStorage.getItem('mona.web.sidebar.sections.v1')))==='[\"tasks\",\"projects\"]'"));
+      await hover('.sessions-heading');
+      await waitPage("getComputedStyle(document.querySelector('.sessions-heading-actions')).opacity==='1'",'task section controls visible');
+      await shot('sidebar-sections-reordered');
+      await evaluate("(()=>{const handle=document.querySelector('#sessions-options');handle.focus();handle.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',altKey:true,bubbles:true,cancelable:true}));})()");
+      check('keyboard section move restores the order without opening the task menu',await evaluate("document.querySelector('.sidebar-navigation').firstElementChild.id==='projects-region'&&document.querySelector('#sessions-options-menu').hidden&&JSON.stringify(JSON.parse(localStorage.getItem('mona.web.sidebar.sections.v1')))==='[\"projects\",\"tasks\"]'"));
+      await hover('#new-chat');
+      await waitPage("getComputedStyle(document.querySelector('.projects-heading-actions')).opacity==='0'&&getComputedStyle(document.querySelector('.project-group:last-child .project-actions')).opacity==='0'",'project actions hidden after pointer leaves');
+      check('project header and row actions are hidden until hover',await evaluate("getComputedStyle(document.querySelector('.projects-heading-actions')).opacity==='0'&&getComputedStyle(document.querySelector('.project-group:last-child .project-actions')).opacity==='0'"));
+      await hover('.project-group:last-child .project-row');
+      await waitPage("getComputedStyle(document.querySelector('.projects-heading-actions')).opacity==='1'&&getComputedStyle(document.querySelector('.project-group:last-child .project-actions')).opacity==='1'",'project hover actions');
+      check('hover reveals project controls without a row background',await evaluate("getComputedStyle(document.querySelector('.project-group:last-child .project-row')).backgroundColor==='rgba(0, 0, 0, 0)'"));
+      await click('#projects-sort');
+      await evaluate("(()=>{const groups=[...document.querySelectorAll('#project-list .project-group')],source=groups.at(-1).querySelector('.project-item'),target=groups[0].querySelector('.project-item'),dataTransfer=new DataTransfer(),y=target.getBoundingClientRect().top+1;source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer}));target.dispatchEvent(new DragEvent('dragover',{bubbles:true,dataTransfer,clientY:y}));target.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer,clientY:y}));source.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer}));})()");
+      check('drag sorting moves a project and saves its order',await evaluate("(()=>{const key=Object.keys(localStorage).find(key=>key.startsWith('mona.web.projects.order.v1:'));return document.querySelector('#project-list .project-row')?.textContent.includes('UI Project')&&JSON.parse(localStorage.getItem(key)||'[]').length===2})()"));
+      await evaluate("(()=>{const row=document.querySelector('#project-list .project-row');row.focus();row.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));})()");
+      check('keyboard sorting moves the focused project',await evaluate("document.querySelector('#project-list .project-row')?.textContent.includes('Project Two')"));
+      await click('#projects-sort');await click('#projects-collapse');
+      check('project heading collapses the project list',await evaluate("document.querySelector('#projects-collapse').getAttribute('aria-expanded')==='false'&&getComputedStyle(document.querySelector('#project-list')).display==='none'"));
+      await click('#projects-collapse');
+      await click('.project-group:last-child .project-options');
+      check('project options contain the removal action',await evaluate("!document.querySelector('.project-options-menu').hidden&&document.querySelector('.project-options-menu').textContent.includes('移除项目登记')"));
+      await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+      await click('.project-group:last-child .project-new');
+      await waitPage("document.querySelector('#project-context').textContent==='UI Project'",'project task created from row action');
+      check('project new-task action binds the project',true);
+      await click('#settings-button');await click('#settings-appearance-tab');await click('label.theme-mode:has(#theme-mode-light)');await click('#settings-back');
+      await click('#new-chat');
+      await waitPage("!document.querySelector('#project-picker').hidden && document.querySelector('#project-context').textContent===''",'unselected project picker');
+      await shot('new-task-project-empty');
+      await click('#project-picker');
+      await waitPage("!document.querySelector('#composer-project-menu').hidden && [...document.querySelectorAll('#composer-project-menu button')].some(button=>button.textContent.includes('UI Project'))",'real project options');
+      check('project menu opens above the trigger with focused search and actual actions',await evaluate("(()=>{const menu=document.querySelector('#composer-project-menu'),trigger=document.querySelector('#project-picker');return menu.getBoundingClientRect().bottom<trigger.getBoundingClientRect().top && document.activeElement.id==='project-menu-search' && menu.querySelector('#project-menu-actions').textContent.includes('添加项目') && menu.querySelector('#project-menu-actions').textContent.includes('不在项目中工作') && !menu.textContent.includes('远程连接')})()"));
+      await fill('#project-menu-search','Project Two');
+      check('search filters actual projects and keeps the outside-project action',await evaluate("(()=>{const rows=[...document.querySelectorAll('#project-menu-list button')];return rows.length===1 && rows[0].textContent.includes('Project Two') && document.querySelector('#project-menu-actions').textContent.includes('不在项目中工作')})()"));
+      await fill('#project-menu-search','');
+      await send('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowDown',code:'ArrowDown',windowsVirtualKeyCode:40});
+      check('arrow key moves from search to the first project',await evaluate("document.activeElement===document.querySelector('#project-menu-list button')"));
+      await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+      check('Escape closes the menu and restores focus',await evaluate("document.querySelector('#composer-project-menu').hidden && document.activeElement.id==='project-picker'"));
+      await click('#project-picker');
+      await click('.composer-project-add');
+      await waitPage("document.querySelector('#project-dialog').open",'project name dialog from composer');
+      await shot('project-name-dialog');
+      await click('#project-cancel');
+      await waitPage("!document.querySelector('#project-dialog').open && document.activeElement.id==='project-picker'",'cancelled project form returns focus');
+      check('cancelled project creation leaves projects unchanged',await evaluate("document.querySelectorAll('.project-group').length===2"));
+      await click('#project-picker');
+      await shot('new-task-project-menu');
+      await evaluate("[...document.querySelectorAll('#composer-project-menu button')].find(button=>button.textContent.includes('UI Project')).click()");
+      await waitPage("document.querySelector('#project-context').textContent==='UI Project' && document.querySelector('#composer-project-menu').hidden",'project selected from composer');
+      await click('#project-picker');
+      check('selected project and outside-project row show opposite checked states',await evaluate("(()=>{const project=[...document.querySelectorAll('#project-menu-list button')].find(button=>button.textContent.includes('UI Project'));return project?.getAttribute('aria-checked')==='true' && document.querySelector('.composer-project-outside')?.getAttribute('aria-checked')==='false' && !document.querySelector('#project-detach').hidden})()"));
+      await click('.composer-project-outside');
+      await waitPage("document.querySelector('#project-context').textContent==='' && document.querySelector('#composer-project-menu').hidden",'outside project selected');
+      await click('#project-picker');
+      await evaluate("[...document.querySelectorAll('#project-menu-list button')].find(button=>button.textContent.includes('UI Project')).click()");
+      await waitPage("document.querySelector('#project-context').textContent==='UI Project' && document.querySelector('#composer-project-menu').hidden",'project reselected from composer');
+      await shot('new-task-project-selected');
+      await click('#project-detach');
+      await waitPage("document.querySelector('#project-context').textContent===''",'selected project detached with chip action');
+      await click('#project-picker');
+      await evaluate("[...document.querySelectorAll('#project-menu-list button')].find(button=>button.textContent.includes('UI Project')).click()");
+      await waitPage("document.querySelector('#project-context').textContent==='UI Project'",'project rebound after shortcut detach');
       await fill('#prompt','WRITE:WEB_PROJECT');await click('#send');await waitPage("document.querySelector('#timeline').textContent.includes('已完成 WRITE:WEB_PROJECT') && document.querySelector('#cancel').hidden",'project task settled');
-      check('creating a project task from Web uses the selected project cwd',await readFile(join(a.workspace,'docs','result.txt'),'utf8')==='WEB_PROJECT\n');
+      check('creating a project task from Web uses the selected project cwd',await readFile(join(uiProject.path,'result.txt'),'utf8')==='WEB_PROJECT\n');
+      await waitPage("[...document.querySelectorAll('.project-group')].some(group=>group.querySelector('.project-row')?.textContent.includes('UI Project')&&group.querySelector('.project-sessions')?.textContent.includes('WRITE:WEB_PROJECT'))",'project task grouped in sidebar');
+      check('sidebar places project tasks below their folder and ordinary tasks in the task section',await evaluate("(()=>{const group=[...document.querySelectorAll('.project-group')].find(group=>group.querySelector('.project-row')?.textContent.includes('UI Project'));return group?.querySelector('.project-sessions .session-row')?.textContent.includes('WRITE:WEB_PROJECT')&&document.querySelector('#sessions-list')?.textContent.includes('WRITE:ORDINARY_A')})()"));
+      check('selected project and task stay flat with their titles aligned',await evaluate("(()=>{const group=[...document.querySelectorAll('.project-group')].find(group=>group.querySelector('.project-row')?.textContent.includes('UI Project')),project=group?.querySelector('.project-row'),task=group?.querySelector('.project-sessions .session-row');return project&&task&&getComputedStyle(project).backgroundColor==='rgba(0, 0, 0, 0)'&&getComputedStyle(task).backgroundColor==='rgba(0, 0, 0, 0)'&&Math.abs(project.querySelector('span').getBoundingClientRect().left-task.querySelector('.session-title').getBoundingClientRect().left)<3})()"));
+      await hover('.project-group:last-child .project-row');
+      await waitPage("getComputedStyle(document.querySelector('.project-group:last-child .project-actions')).opacity==='1'",'reference project controls visible');
+      await shot('sidebar-project-groups-light');
+      await evaluate("document.querySelector('#project-list .project-group:first-child').hidden=true");
+      await hover('.project-group:last-child .project-row');
+      await waitPage("getComputedStyle(document.querySelector('.project-group:last-child .project-actions')).opacity==='1'&&getComputedStyle(document.querySelector('.project-group:last-child .session-action')).opacity==='0'",'reference hover after project layout shift');
+      const projectCrop=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,clip:{x:0,y:119,width:294,height:118,scale:2}});
+      await writeFile(join(output,'sidebar-project-reference-scale.png'),Buffer.from(projectCrop.data,'base64'));
+      await evaluate("document.querySelector('#project-list .project-group:first-child').hidden=false");
+      await hover('.project-group:last-child .project-sessions .session-row');
+      check('project task hover has no background block',await evaluate("getComputedStyle(document.querySelector('.project-group:last-child .project-sessions .session-row')).backgroundColor==='rgba(0, 0, 0, 0)'"));
+      await hover('#sessions-list .session-row');
+      check('ordinary task hover has no background block',await evaluate("getComputedStyle(document.querySelector('#sessions-list .session-row')).backgroundColor==='rgba(0, 0, 0, 0)'"));
+      await click('#settings-button');await click('#settings-appearance-tab');await click('label.theme-mode:has(#theme-mode-dark)');await waitPage("document.documentElement.dataset.theme==='dark'",'dark sidebar theme');await click('#settings-back');
+      await shot('sidebar-project-groups-dark');
+      await click('#settings-button');await click('#settings-appearance-tab');await click('label.theme-mode:has(#theme-mode-light)');await waitPage("document.documentElement.dataset.theme==='light'",'light sidebar theme');await click('#settings-back');
+      for(let index=0;index<5;index++)await request('/api/sessions',{request_id:`sidebar-extra-${index}`,project_id:id});
+      await evaluate("document.querySelector('#sessions-refresh').click()");
+      const projectGroup = `.project-group[data-project-id="${id}"]`;
+      await waitPage(`document.querySelector(${JSON.stringify(projectGroup+' .project-more')})?.hidden===false&&document.querySelectorAll(${JSON.stringify(projectGroup+' .session-row')}).length===5`,'project group initial limit');
+      await click(`${projectGroup} .project-more`);
+      await waitPage(`document.querySelectorAll(${JSON.stringify(projectGroup+' .session-row')}).length===6`,'project group expanded');
+      check('show more expands only the chosen project group',await evaluate(`document.querySelectorAll(${JSON.stringify(projectGroup+' .session-row')}).length===6&&document.querySelectorAll('#sessions-list .session-row').length===4`));
       await click('#new-chat');await waitPage("document.querySelector('#project-context').textContent===''",'ordinary new task');
       check('global new-task entry does not inherit the last project',true);
     }else check('base-only UI hides project management while retaining files and settings',await evaluate("document.querySelector('#projects-region').hidden && !document.querySelector('#files-toggle').hidden"));
@@ -206,6 +317,14 @@ try {
     await click(`#sessions-list button[data-session-id="${a.id}"]`);
     await waitPage("location.hash.includes('ordinary-a') && !document.querySelector('#sessions-refresh').disabled && !document.querySelector('#files-toggle').hidden",'saved session selected for mobile preview');
     await send('Emulation.setDeviceMetricsOverride',{width:390,height:900,deviceScaleFactor:1,mobile:false});
+    if(!noProjects){
+      await waitPage("document.querySelector('#sidebar-toggle').parentElement===document.querySelector('.thread-heading')&&document.querySelector('#chat-sidebar').inert",'mobile sidebar toggle settled');
+      await click('#sidebar-toggle');await waitPage("document.querySelector('.shell').classList.contains('sidebar-open')",'mobile project drawer');
+      check('mobile project drawer keeps grouped tasks within the viewport',await evaluate("document.documentElement.scrollWidth<=390&&document.querySelector('#chat-sidebar').getBoundingClientRect().right<=390&&document.querySelector('.project-group .project-sessions .session-row')!==null"));
+      await shot('sidebar-project-groups-mobile');
+      await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+      await waitPage("!document.querySelector('.shell').classList.contains('sidebar-open')",'mobile drawer closed');
+    }
     await click('#files-toggle');await waitPage("!document.querySelector('#files-panel').hidden",'mobile files');
     check('390px right panel is an independent bounded overlay',await evaluate("document.querySelector('#files-panel').getBoundingClientRect().width<=390 && document.documentElement.scrollWidth<=390 && document.querySelector('#files-panel').getAttribute('aria-modal')==='true'"));
     await shot('workspace-mobile');await send('Emulation.setDeviceMetricsOverride',{width:320,height:800,deviceScaleFactor:1,mobile:false});

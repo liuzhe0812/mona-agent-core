@@ -15,7 +15,7 @@
   --line: #dedede;
   --soft: #efefef;
   --accent: #171717;
-  --sidebar: #ececec;
+  --sidebar: #ececee;
   --selected: #dedede;
   --danger: #a53030;
   --success: #236b43;
@@ -38,6 +38,7 @@
   --ui-text-18: 18px;
   --ui-text-20: 20px;
   --ui-text-24: 24px;
+  --ui-text-26: 26px;
   --ui-weight-regular: 400;
   --ui-weight-medium: 500;
   --ui-weight-semibold: 600;
@@ -81,6 +82,10 @@
   --ui-radius-none: 0;
   --ui-radius-data: 2px;
   --ui-radius-keycap: 4px;
+  --ui-radius-inline-code: 6px;
+  --ui-radius-mode-chip: 14px;
+  --ui-radius-popover: 16px;
+  --ui-blockquote-border: 2px;
   --ui-radius-inner: 8px;
   --ui-radius-container: 12px;
   --ui-radius-pill: 9999px;
@@ -103,18 +108,29 @@
   --ui-resizer-hit: 6px;
   --ui-brand-mark-size: 24px;
   --ui-status-dot-size: 6px;
-  --ui-send-size: var(--ui-control-sm);
+  --ui-send-size: 34px;
+  --ui-home-mark-size: 34px;
+  --ui-composer-draft-floor: 36px;
+  --ui-composer-hero-floor: 52px;
+  --ui-radius-composer: 22px;
   --ui-activity-row-height: 28px;
   --ui-composer-min-height: 56px;
   --ui-composer-max-height: 220px;
+  --ui-message-image-thumb: 176px;
+  --ui-message-image-mobile: 128px;
+  --ui-message-image-max-height: 360px;
   --ui-tool-command-max-height: 132px;
   --ui-tool-result-max-height: 320px;
+  /* A group contains multiple tool rows; its cap is distinct from one tool's output. */
+  --ui-process-max-height: 400px;
   --ui-provider-sidebar-width: 240px;
   --ui-files-width: 340px;
   --ui-files-overlay-width: 420px;
   --ui-right-pane-default-width: 420px;
   --ui-right-pane-min-width: 320px;
   --ui-right-pane-max-width: 720px;
+  --ui-right-pane-split-min-width: 640px;
+  --ui-right-pane-column-min-width: 240px;
   --ui-right-tab-width: 156px;
   --ui-right-tab-min-width: 60px;
   --ui-right-tab-height: 28px;
@@ -141,16 +157,25 @@
   --surface-elevated: var(--panel);
   --surface-sidebar: var(--sidebar);
   --surface-chip: var(--soft);
+  --surface-chat-bubble: color-mix(in srgb, var(--text-primary) 3%, var(--surface-elevated));
   --surface-selected: var(--selected);
   --surface-hover: color-mix(in srgb, var(--selected) 82%, transparent);
   --surface-hover-strong: color-mix(in srgb, var(--selected) 92%, var(--text));
   --surface-disabled: color-mix(in srgb, var(--panel) 75%, var(--soft));
   --border-default: var(--line);
+  --border-chat: color-mix(in srgb, var(--text-primary) 10%, var(--surface-elevated));
   --border-strong: color-mix(in srgb, var(--muted) 58%, var(--line));
   --text-primary: var(--text);
   --text-secondary: var(--muted);
   --text-tertiary: color-mix(in srgb, var(--muted) 72%, var(--bg));
   --text-placeholder: color-mix(in srgb, var(--muted) 66%, var(--bg));
+  --content-link: #0066dd;
+  --code-foreground: #24292f;
+  --code-comment: #6e7781;
+  --code-keyword: #cf222e;
+  --code-string: #0a3069;
+  --code-number: #0550ae;
+  --code-title: #8250df;
   --accent-bg: var(--accent);
   --accent-fg: var(--inverse);
   --status-danger: var(--danger);
@@ -168,17 +193,32 @@
   --motion-exit-ui: var(--motion-exit);
   --motion-shimmer-cycle: 1800ms;
   --ui-shadow-hover-card: 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%);
+  /* Only the shared task input uses this subtle elevation, never settings or content cards. */
+  --ui-shadow-composer: 0 4px 24px color-mix(in srgb, var(--text-primary) 6%, transparent);
+  --ui-composer-send-bg: #3964fe;
+  --ui-composer-send-fg: #ffffff;
+  --ui-folder-tab: #f0b334;
+  --ui-folder-body: #fbd36d;
+  --ui-folder-front: #4ba8e9;
 
   /* Theme-controlled shape fallbacks. */
-  --skin-composer-radius: var(--ui-radius-container);
+  --skin-composer-radius: var(--ui-radius-composer);
   --skin-bubble-radius: var(--ui-radius-container);
   --skin-panel-radius: var(--ui-radius-container);
   --skin-detail-radius: var(--ui-radius-inner);
-  --chat-font-size: var(--ui-text-15);
+  --chat-font-size: var(--ui-text-14);
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
+  --content-link: #80beff;
+  --code-foreground: #c9d1d9;
+  --code-comment: #8b949e;
+  --code-keyword: #ff7b72;
+  --code-string: #a5d6ff;
+  --code-number: #79c0ff;
+  --code-title: #d2a8ff;
+  --ui-composer-send-bg: #679efe;
   --bg: #181818;
   --panel: #222222;
   --text: #e5e5e5;

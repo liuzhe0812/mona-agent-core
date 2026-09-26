@@ -493,10 +493,25 @@ async function handleApiRequest(request, response) {
     sendJson(request, response, 200, { protocol_version: 2, stream: 'sse', replay: 'bounded_in_memory', durable: false });
     return;
   }
+  if (url.pathname === '/api/ui' && request.method === 'GET') {
+    if (request.uiFixtureManagement) sendJson(request, response, 200, { version: 1, modules: ['capabilities', 'models'], capabilities: {
+      'model-management': { compiled: true, enabled: true, active: true, configurable: false, restart_required: false },
+    } });
+    else sendError(request, response, 404, 'not_found', '此测试宿主没有产品 UI 模块。');
+    return;
+  }
   if (url.pathname === '/api/model-settings' && request.method === 'GET') {
-    if (request.uiFixtureManagement) sendJson(request, response, 200, clone(MODEL_SETTINGS_FIXTURE));
+    if (request.uiFixtureManagement) sendJson(request, response, 200, clone(request.uiFixtureModels));
     else sendError(request, response, 404, 'not_found', '模型管理插件未安装。');
     return;
+  }
+  if (url.pathname === '/api/model-settings/default' && request.method === 'POST' && request.uiFixtureManagement) {
+    const body = await readJson(request), state = request.uiFixtureModels;
+    if (body.revision !== state.revision) { sendError(request, response, 409, 'conflict', '模型配置版本已变更。'); return; }
+    const provider = state.providers.find(p => p.id === body.provider_id);
+    if (!provider?.models.some(m => m.id === body.model_id)) { sendError(request, response, 400, 'invalid_request', '模型不存在。'); return; }
+    state.default = { provider_id: body.provider_id, model_id: body.model_id }; state.revision++;
+    sendJson(request, response, 200, clone(state)); return;
   }
   if (url.pathname === '/api/capabilities' && request.method === 'GET') {
     if (request.uiFixtureManagement) sendJson(request, response, 200, clone(CAPABILITIES_FIXTURE));
@@ -628,10 +643,12 @@ async function handleApiRequest(request, response) {
 }
 
 export function createFixtureApiServer({ allowOrigin, management = false } = {}) {
+  const models = clone(MODEL_SETTINGS_FIXTURE);
   return createServer((request, response) => {
     // Tests can use isolated ephemeral ports; the default fixture keeps its original allowlist.
     if (allowOrigin) request.uiFixtureOriginAllowed = allowOrigin(request.headers.origin) === true;
     request.uiFixtureManagement = management === true;
+    request.uiFixtureModels = models;
     void handleApiRequest(request, response).catch((error) => {
       if (!response.headersSent) sendError(request, response, 500, 'internal', error.message || 'fixture server error');
       else response.destroy();

@@ -12,6 +12,7 @@ class SideClient {
   configure(base, token) { this.clear(); this.#base = String(base).replace(/\/+$/, ''); this.#token = String(token || ''); }
   clear() { this.#generation++; for (const c of this.#requests) c.abort(); this.#requests.clear(); this.#base = ''; this.#token = ''; }
   get configured() { return Boolean(this.#base && this.#token); }
+  fork() { const client = new SideClient(); client.configure(this.#base, this.#token); return client; }
   async #request(path, { method = 'POST', body } = {}) {
     if (!this.configured) throw new Error('当前连接不支持侧边对话。');
     const generation = this.#generation, controller = new AbortController(); this.#requests.add(controller);
@@ -47,25 +48,28 @@ function windowIdentity() {
 }
 
 export class SideConversationUI {
-  constructor({ pane, session, client, artifactReader, available = () => false }) {
+  constructor({ pane, session, client, artifactReader, available = () => false, presentation = () => ({}) }) {
+    this.events = new AbortController(); const on = (target, type, fn, options = {}) => target.addEventListener(type, fn, { ...options, signal: this.events.signal });
+    this.presentation = presentation;
     this.available = available;
     this.pane = pane; this.session = session; this.client = client; this.artifactReader = artifactReader;
     this.api = new SideClient(); this.windowId = windowIdentity(); this.threads = new Map();
     this.desktop = matchMedia('(min-width: 681px)');
-    this.desktop.addEventListener('change', () => this.pane.renderActions());
+    on(this.desktop, 'change', () => this.pane.renderActions());
     this.pane.registerAction({
       id: 'side', label: '侧边对话',
       available: scope => this.api.configured && this.available() && this.desktop.matches && scope.startsWith('session:') && Boolean(this.session()?.id),
       run: () => this.open(),
     });
   }
+  dispose() { this.events.abort(); this.clear(); }
   configure(base, token) { this.api.configure(base, token); this.pane.renderActions(); }
   clear() {
     this.api.clear();
-    for (const thread of this.threads.values()) this.disposeThread(thread, false);
+    for (const thread of this.threads.values()) void this.disposeThread(thread, false).catch(() => {});
     this.threads.clear(); this.pane.renderActions();
   }
-  async open(initial = '') {
+  async open(initial = '', { draft = false } = {}) {
     if (!this.available()) throw new Error('当前宿主未开放侧边对话。');
     const parent = this.session();
     if (!parent?.id) throw new Error('请先打开一个已保存的任务。');
@@ -76,20 +80,26 @@ export class SideConversationUI {
       thread = this.createThread(parent, scope, tabId);
       this.threads.set(scope, thread);
       try {
-        const view = await this.api.open(parent.id, this.windowId);
+        thread.ready = thread.api.open(parent.id, this.windowId);
+        const view = await thread.ready;
+        if (thread.disposed) throw new DOMException('旁支所属连接已关闭。', 'AbortError');
         this.renderSaved(thread, view);
       } catch (error) {
-        this.threads.delete(scope); throw error;
+        if (this.threads.get(scope) === thread) this.threads.delete(scope);
+        void this.disposeThread(thread, false).catch(() => {}); throw error;
       }
     }
+    if (thread.ready) await thread.ready;
+    if (thread.disposed) throw new DOMException('旁支已关闭。', 'AbortError');
     this.pane.openTab({
       id: tabId, title: '侧边对话', kind: 'side', node: thread.root, scope,
-      onClose: () => { void this.disposeThread(thread, true); this.threads.delete(scope); },
+      onClose: () => { this.threads.delete(scope); return this.disposeThread(thread, true); },
       onActivate: () => thread.input.focus(),
     });
     if (initial.trim()) {
       thread.input.value = initial.trim();
-      await this.submit(thread);
+      if (!draft) await this.submit(thread);
+      else thread.input.focus();
     }
   }
   createThread(parent, scope, tabId) {
@@ -102,12 +112,28 @@ export class SideConversationUI {
     const stop = node('button', 'secondary', '停止'); stop.type = 'button'; stop.hidden = true;
     const send = node('button', 'send', '↑'); send.type = 'submit'; send.setAttribute('aria-label', '发送侧边对话');
     actions.append(status, stop, send); form.append(input, actions); root.append(timeline, form);
-    const thread = { parent, scope, tabId, root, timeline, input, status, stop, send, turns: new Map(), active: null, subscriptions: new Set() };
+    const thread = { parent, scope, tabId, root, timeline, input, status, stop, send, api: this.api.fork(), client: this.client(), turns: new Map(), active: null, subscriptions: new Set() };
+    thread.following = true;
+    const bottom = node('button', 'text-button side-back-bottom', '回到底部'); bottom.type = 'button'; bottom.hidden = true; root.insertBefore(bottom, form);
+    bottom.addEventListener('click', () => { thread.following = true; timeline.scrollTop = timeline.scrollHeight; bottom.hidden = true; });
+    timeline.addEventListener('scroll', () => { thread.following = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= 24; bottom.hidden = thread.following; }, { passive: true });
+    thread.scheduleScroll = () => {
+      if (thread.scrollFrame || thread.disposed) return;
+      thread.scrollFrame = requestAnimationFrame(() => { thread.scrollFrame = 0; if (thread.following) timeline.scrollTop = timeline.scrollHeight; bottom.hidden = thread.following || timeline.scrollHeight <= timeline.clientHeight + 24; });
+    };
+    thread.observer = new ResizeObserver(thread.scheduleScroll);
+    timeline.addEventListener('mona:content-resized', thread.scheduleScroll);
     form.addEventListener('submit', event => { event.preventDefault(); void this.submit(thread); });
     input.addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); void this.submit(thread); }
     });
-    stop.addEventListener('click', () => { if (thread.active) void this.client()?.cancel(thread.active).catch(() => {}); });
+    stop.addEventListener('click', async () => {
+      const runId = thread.active || thread.unconfirmed;
+      if (!runId || stop.disabled) return; stop.disabled = true;
+      try { await thread.client?.cancel(runId); thread.status.textContent = '正在停止…'; }
+      catch (error) { thread.error = `停止请求未确认：${error.message}`; thread.status.textContent = thread.error; }
+      finally { stop.disabled = false; }
+    });
     return thread;
   }
   renderSaved(thread, view) {
@@ -124,19 +150,21 @@ export class SideConversationUI {
     let dom = thread.turns.get(key);
     if (dom) return dom;
     thread.timeline.querySelector('.side-empty')?.remove();
-    dom = new TurnView(prompt, { artifactReader: this.artifactReader });
+    dom = new TurnView(prompt, { artifactReader: this.artifactReader, ...this.presentation(thread.parent) });
     dom.turn.dataset.sideTurn = key; thread.timeline.append(dom.turn); thread.turns.set(key, dom);
+    thread.observer.observe(dom.turn); thread.scheduleScroll();
     return dom;
   }
   async submit(thread) {
     const prompt = thread.input.value.trim();
-    if (!prompt || thread.active || thread.starting || thread.disposed) return;
+    if (!prompt || thread.active || thread.starting || thread.unconfirmed || thread.disposed) return;
     if (thread.uncertain) { thread.status.textContent = '上次启动结果未确认，请关闭并重开旁支查看，不能直接重复提交。'; return; }
-    thread.starting = true;
+    thread.starting = true; thread.error = ''; thread.following = true;
     const key = requestId(), dom = this.turn(thread, key, prompt);
     thread.input.value = ''; thread.status.textContent = '正在启动…'; thread.send.disabled = true;
     try {
-      const response = await this.api.start(thread.parent.id, this.windowId, prompt, key);
+      const response = await thread.api.start(thread.parent.id, this.windowId, prompt, key);
+      if (thread.disposed) return;
       const view = new RunView(response.run_id);
       await this.watch(thread, response.run_id, dom, view);
     } catch (error) {
@@ -145,7 +173,8 @@ export class SideConversationUI {
     } finally { thread.starting = false; this.sync(thread); }
   }
   async watch(thread, runId, dom, view) {
-    const client = this.client();
+    const client = thread.client;
+    if (thread.disposed) return;
     if (!client) throw new Error('Agent 连接不可用。');
     thread.active = runId; this.sync(thread);
     try {
@@ -154,29 +183,44 @@ export class SideConversationUI {
       if (view.state.outcome) return;
       const subscription = client.subscribe(runId, {
         after: view.state.seq,
-        onFrame: frame => { view.apply(frame); dom.update(view.state); if (view.state.outcome) { subscription.close(); this.sync(thread); } },
+        onFrame: frame => { if (thread.disposed) return; view.apply(frame); dom.update(view.state); if (view.state.outcome) { subscription.close(); this.sync(thread); } },
       });
       thread.subscriptions.add(subscription);
-      try { await subscription.closed; }
-      finally { thread.subscriptions.delete(subscription); }
+      try {
+        await subscription.closed;
+        if (!thread.disposed && !view.state.outcome) {
+          const snapshot = await client.snapshot(runId); view.apply({ kind: 'snapshot', reason: 'source_resync', snapshot }); dom.update(view.state);
+          if (!view.state.outcome) throw new Error('事件流结束但任务尚未结算。');
+        }
+      } finally { thread.subscriptions.delete(subscription); }
     } catch (error) {
-      if (!view.state.outcome) dom.fail(`连接中断：${error?.message || error}`);
+      if (!thread.disposed && !view.state.outcome) {
+        thread.unconfirmed = runId; thread.error = '连接中断，请重新连接确认任务状态。';
+        dom.connectionLost(thread.error, async () => { thread.unconfirmed = null; thread.error = ''; await this.watch(thread, runId, dom, view); });
+      }
     } finally {
       if (thread.active === runId) thread.active = null;
       this.sync(thread);
     }
   }
   sync(thread) {
-    const busy = Boolean(thread.active || thread.starting);
+    const busy = Boolean(thread.active || thread.starting || thread.unconfirmed);
     thread.stop.hidden = !busy; thread.send.disabled = busy || !this.api.configured; thread.input.disabled = busy;
-    thread.status.textContent = busy ? '正在工作' : thread.error || '';
-    if (!busy && this.pane.scope === thread.scope && !thread.root.hidden && !this.pane.pane.hidden) thread.input.focus();
+    thread.status.textContent = thread.unconfirmed ? thread.error : busy ? '正在工作' : thread.error || '';
   }
-  async disposeThread(thread, removeRemote) {
-    thread.disposed = true;
+  disposeThread(thread, removeRemote) {
+    if (thread.closing) return thread.closing;
+    thread.disposed = true; thread.observer?.disconnect(); if (thread.scrollFrame) cancelAnimationFrame(thread.scrollFrame);
+    for (const view of thread.turns.values()) view.dispose();
     for (const sub of thread.subscriptions) sub.close();
     thread.subscriptions.clear();
-    if (thread.active) await this.client()?.cancel(thread.active).catch(() => {});
-    if (removeRemote) await this.api.close(thread.parent.id, this.windowId).catch(() => {});
+    thread.closing = (async () => {
+      try {
+        await thread.ready?.catch(() => {});
+        if (removeRemote) await thread.api.close(thread.parent.id, this.windowId);
+        // UI disposal is observation cleanup, not task cancellation.
+      } finally { thread.api.clear(); }
+    })();
+    return thread.closing;
   }
 }

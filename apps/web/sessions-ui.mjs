@@ -6,8 +6,10 @@ const label = { idle: '未开始', running: '运行中', completed: '已保存',
 const node = (tag, className, value = '') => { const n = document.createElement(tag); n.className = className; n.textContent = value; return n; };
 
 const TASKS_COLLAPSED_KEY = 'mona.web.tasks.v1';
+const SIDEBAR_GROUP_PAGE = 5;
 const SESSION_MENU_VIEWPORT_GUTTER = 8;
 const SESSION_MENU_ANCHOR_GAP = 4;
+const TASK_NAV_LIMIT = 64;
 function tasksCollapsed() {
   try { return localStorage.getItem(TASKS_COLLAPSED_KEY) === '1'; } catch { return false; }
 }
@@ -63,18 +65,40 @@ export class ConversationUI {
     this.generation = 0; this.listGeneration = 0; this.entries = []; this.nextOffset = null;
     this.createKey = null; this.searchTimer = undefined; this.searchGeneration = 0; this.results = [];
     this.menuOpener = null; this.rows = new Map();
-    this.project = null; this.projectsEnabled = false;
+    this.navigation = []; this.navigationIndex = -1; this.navigationReplay = null;
+    this.project = null; this.projectsEnabled = false; this.projects = []; this.groupLimits = new Map(); this.loadingMore = false;
     applyTasksCollapsed(tasksCollapsed());
     $('#sessions-collapse').addEventListener('click', () => applyTasksCollapsed(!$('.sessions-region').classList.contains('is-collapsed')));
-    $('#sessions-new').addEventListener('click', () => { if (this.newChat(this.project)) $('#prompt').focus(); });
+    $('#sessions-new').addEventListener('click', () => { if (this.newChat(null)) $('#prompt').focus(); });
+    $('#task-back').addEventListener('click', () => { void this.navigateTask(-1); });
+    $('#task-forward').addEventListener('click', () => { void this.navigateTask(1); });
     $('#sessions-refresh').addEventListener('click', () => { void this.refresh(); });
-    $('#sessions-more').addEventListener('click', () => { void this.refreshList(this.nextOffset).catch(e => this.notice(e.message, true)); });
+    $('#sessions-more').addEventListener('click', () => { void this.showMore('ordinary'); });
     this.showArchived = false;
     $('#sessions-options').addEventListener('click', event => { event.stopPropagation(); this.openOptions(); });
     $('#sessions-archived').addEventListener('click', () => { this.closeMenu(); void this.toggleArchived(); });
+    $('#thread-more').addEventListener('click', event => {
+      event.stopPropagation();
+      if (this.selected) this.openMenu(this.selected, event.currentTarget, event.currentTarget, undefined, true);
+    });
+    $('#header-archive-dialog').addEventListener('click', event => {
+      if (event.target !== $('#header-archive-dialog')) return;
+      const box = event.target.getBoundingClientRect();
+      if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) event.target.close('cancel');
+    });
     const menus = [$('#session-menu'), $('#sessions-options-menu')];
     document.addEventListener('pointerdown', event => {
-      if (this.menuOpen() && !menus.some(menu => menu.contains(event.target))) this.closeMenu();
+      if (this.menuOpen() && !menus.some(menu => menu.contains(event.target)) && !this.menuOpener?.contains(event.target)) this.closeMenu();
+    });
+    $('#session-menu').addEventListener('keydown', event => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const items = [...$('#session-menu').querySelectorAll('button:not(:disabled)')];
+      if (!items.length) return;
+      event.preventDefault();
+      const current = items.indexOf(document.activeElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : event.key === 'ArrowDown' ? (current + 1) % items.length : (current < 0 ? items.length - 1 : current - 1 + items.length) % items.length;
+      items[next].focus();
     });
     document.addEventListener('scroll', () => { if (this.menuOpen()) this.closeMenu(); }, true);
     window.addEventListener('resize', () => { if (this.menuOpen()) this.closeMenu(); });
@@ -88,7 +112,7 @@ export class ConversationUI {
     $('#search-settings').addEventListener('click', () => { this.closeSearch(); this.hooks.openSettings(); });
     $('#search-refresh').addEventListener('click', () => { void this.search($('#sessions-search').value.trim()); });
     const searchDialog = $('#search-dialog');
-    searchDialog.addEventListener('close', () => $('#search-button').setAttribute('aria-expanded', 'false'));
+    searchDialog.addEventListener('close', () => { if (!searchDialog.open) { this.invalidateSearch(); $('#search-button').setAttribute('aria-expanded', 'false'); } });
     searchDialog.addEventListener('click', (event) => {
       if (event.target !== searchDialog) return;
       const rect = searchDialog.getBoundingClientRect();
@@ -97,7 +121,7 @@ export class ConversationUI {
       if (!inside) this.closeSearch();
     });
     $('#sessions-search').addEventListener('input', () => {
-      clearTimeout(this.searchTimer);
+      this.invalidateSearch();
       this.searchTimer = setTimeout(() => { void this.search($('#sessions-search').value.trim()); }, 200);
     });
     $('#sessions-search').addEventListener('keydown', event => {
@@ -108,8 +132,17 @@ export class ConversationUI {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k' || document.querySelector('dialog[open]')) return;
       event.preventDefault(); this.openSearch();
     });
+    document.addEventListener('keydown', event => {
+      if (event.defaultPrevented || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey
+        || document.querySelector('dialog[open]') || $('#chat-workspace').inert || $('#chat-workspace').hidden) return;
+      const delta = event.code === 'BracketLeft' ? -1 : event.code === 'BracketRight' ? 1 : 0;
+      if (!delta) return;
+      event.preventDefault(); void this.navigateTask(delta);
+    });
   }
+  invalidateSearch() { this.searchGeneration++; clearTimeout(this.searchTimer); }
   openSearch() {
+    this.invalidateSearch();
     const dialog = $('#search-dialog');
     if (!dialog.open) dialog.showModal();
     $('#search-button').setAttribute('aria-expanded', 'true');
@@ -118,9 +151,9 @@ export class ConversationUI {
     else this.render([], this.mode === 'none' ? '连接后可以搜索本地任务。' : '当前宿主未提供本地会话存储，刷新或重启不会保留记录。');
     $('#sessions-search').focus();
   }
-  closeSearch() { const dialog = $('#search-dialog'); if (dialog.open) dialog.close(); }
+  closeSearch() { this.invalidateSearch(); const dialog = $('#search-dialog'); if (dialog.open) dialog.close(); }
   async search(query) {
-    if (!this.persistent || !this.api.configured) return;
+    if (!this.persistent || !this.api.configured || !$('#search-dialog').open) return;
     const generation = ++this.searchGeneration;
     try {
       const page = await this.api.list({ offset: 0, q: query, archived: this.showArchived });
@@ -158,22 +191,61 @@ export class ConversationUI {
   notify() { this.controls(); this.hooks.changed(); }
   notice(message = '', failure = false) {
     const n = $('#sessions-notice'); n.textContent = message; n.classList.toggle('error', failure);
+    n.classList.toggle('is-routine', message === '已保存在宿主本地');
   }
   controls() {
     const busy = this.loading || this.hooks.busy();
     $('#sessions-search').disabled = busy || !this.persistent;
     $('#sessions-more').disabled = busy;
     $('#sessions-refresh').disabled = busy || !this.api.configured;
-    for (const button of $('#sessions-list').querySelectorAll('.session-row')) button.disabled = busy;
+    for (const button of $('#chat-sidebar').querySelectorAll('.session-row')) button.disabled = busy;
     // Navigation flags stay available during a run; only an in-flight list write blocks them.
-    for (const button of $('#sessions-list').querySelectorAll('.session-action')) button.disabled = this.loading;
+    for (const button of $('#chat-sidebar').querySelectorAll('.session-action')) button.disabled = this.loading;
     this.syncArchivedChoice();
+    this.renderTaskNavigation();
+  }
+  renderTaskNavigation() {
+    const busy = this.loading || this.hooks.busy();
+    $('#task-back').disabled = busy || this.navigationIndex <= 0;
+    $('#task-forward').disabled = busy || this.navigationIndex >= this.navigation.length - 1;
+  }
+  rememberTask() {
+    const item = { id: this.selected?.id || null, projectId: this.selected ? null : this.project?.id || null };
+    if (this.navigationReplay != null) {
+      this.navigationIndex = this.navigationReplay; this.navigation[this.navigationIndex] = item; this.navigationReplay = null;
+    } else {
+      const current = this.navigation[this.navigationIndex];
+      if (current?.id === item.id && current?.projectId === item.projectId) return;
+      this.navigation = this.navigation.slice(0, this.navigationIndex + 1);
+      this.navigation.push(item);
+      if (this.navigation.length > TASK_NAV_LIMIT) this.navigation.shift();
+      this.navigationIndex = this.navigation.length - 1;
+    }
+    this.renderTaskNavigation();
+  }
+  async navigateTask(delta) {
+    const index = this.navigationIndex + delta;
+    if (index < 0 || index >= this.navigation.length || this.loading || this.hooks.busy()) return;
+    const target = this.navigation[index]; this.navigationReplay = index;
+    if (target.id) await this.open(target.id);
+    else this.newChat(target.projectId ? this.hooks.findProject?.(target.projectId) || null : null);
+    if (this.navigationReplay != null) { this.navigationReplay = null; this.renderTaskNavigation(); }
+  }
+  forgetTaskNavigation(id) {
+    this.navigationReplay = null;
+    const before = this.navigation.slice(0, this.navigationIndex + 1).filter(item => item.id === id).length;
+    this.navigation = this.navigation.filter(item => item.id !== id);
+    this.navigationIndex = Math.max(-1, Math.min(this.navigation.length - 1, this.navigationIndex - before));
+    this.renderTaskNavigation();
   }
   clear() {
     this.generation++; this.listGeneration++; this.api.clear(); this.mode = 'none'; this.loading = false;
-    this.selected = null; this.pending = null; this.createKey = null; this.entries = []; this.project = null; this.projectsEnabled = false;
+    if ($('#header-archive-dialog').open) $('#header-archive-dialog').close('cancel');
+    this.selected = null; this.pending = null; this.createKey = null; this.entries = []; this.project = null; this.projectsEnabled = false; this.projects = []; this.groupLimits.clear();
+    this.navigation = []; this.navigationIndex = -1; this.navigationReplay = null;
     this.closeSearch(); this.closeMenu(); $('#sessions-search').value = ''; $('#search-results').replaceChildren(); this.results = [];
-    $('#sessions-list').replaceChildren(); $('#sessions-more').hidden = true;
+    $('#sessions-list').replaceChildren(); $('#sessions-more').hidden = true; this.rows.clear();
+    for (const list of $('#project-list').querySelectorAll('.project-sessions')) list.replaceChildren();
     this.hooks.clear(); this.notice('连接后读取本地任务。'); this.notify();
   }
   ephemeral(message) { this.mode = 'ephemeral'; this.notice(message); this.notify(); }
@@ -254,32 +326,63 @@ export class ConversationUI {
     record.unread.setAttribute('aria-hidden', String(!entry.unread || running));
     return record;
   }
+  setProjects(projects) {
+    this.projects = projects;
+    this.renderSidebar();
+  }
+  groupEntries(group, projectIds = new Set(this.projects.map(project => project.id))) {
+    return this.entries.filter(entry => {
+      const id = entry.metadata?.['project.id'];
+      return group === 'ordinary' ? !id || !projectIds.has(id) : id === group;
+    });
+  }
+  renderGroup(list, entries, group) {
+    if (!list) return;
+    const limit = this.groupLimits.get(group) || SIDEBAR_GROUP_PAGE;
+    const rows = entries.slice(0, limit).map(entry => this.updateRow(entry).item);
+    syncChildren(list, rows);
+    const more = group === 'ordinary' ? $('#sessions-more') : list.parentElement.querySelector('.project-more');
+    if (more) more.hidden = entries.length <= limit && this.nextOffset == null;
+  }
+  renderSidebar() {
+    const projectIds = new Set(this.projects.map(project => project.id));
+    for (const [id, record] of this.rows) if (!this.entries.some(entry => entry.id === id)) {
+      record.item.remove(); this.rows.delete(id);
+    }
+    for (const project of this.projects) {
+      const group = [...$('#project-list').querySelectorAll('.project-group')]
+        .find(item => item.dataset.projectId === project.id);
+      this.renderGroup(group?.querySelector('.project-sessions'), this.groupEntries(project.id, projectIds), project.id);
+    }
+    this.renderGroup($('#sessions-list'), this.groupEntries('ordinary', projectIds), 'ordinary');
+  }
+  async showMore(group) {
+    if (this.loadingMore || !this.api.configured) return;
+    this.loadingMore = true;
+    const limit = (this.groupLimits.get(group) || SIDEBAR_GROUP_PAGE) + SIDEBAR_GROUP_PAGE;
+    this.groupLimits.set(group, limit);
+    try {
+      while (this.groupEntries(group).length < limit && this.nextOffset != null) {
+        const offset = this.nextOffset;
+        await this.refreshList(offset);
+        if (this.nextOffset === offset) break;
+      }
+      this.renderSidebar();
+    } catch (error) { this.notice(error.message, true); }
+    finally { this.loadingMore = false; }
+  }
   async refreshList(offset = 0) {
     if (!this.api.configured) return;
     const generation = ++this.listGeneration;
-    const page = await this.api.list({ offset: offset ?? 0, archived: this.showArchived,
-      project_id: this.projectsEnabled ? this.project?.id || '' : undefined });
+    const page = await this.api.list({ offset: offset ?? 0, archived: this.showArchived });
     if (generation !== this.listGeneration) return;
     if (!page || !Array.isArray(page.sessions)) throw new Error('无效的会话列表');
     this.mode = 'persistent';
     this.entries = offset ? [...this.entries, ...page.sessions].filter((item, i, all) => all.findIndex(other => other.id === item.id) === i) : page.sessions;
     this.nextOffset = page.next_offset;
-    $('#sessions-more').hidden = page.next_offset == null;
-    $('#sessions-more').textContent = this.showArchived ? '加载更多已归档任务' : '加载更多';
-    const list = $('#sessions-list');
-    const live = new Set(this.entries.map(entry => entry.id));
-    for (const [id, record] of this.rows) if (!live.has(id)) { record.item.remove(); this.rows.delete(id); }
-    if (!this.entries.length) {
-      for (const record of this.rows.values()) { record.item.remove(); }
-      this.rows.clear();
-      const empty = this.showArchived ? '已归档里还没有任务' : '暂无任务，发送第一条消息后自动保存';
-      const note = list.querySelector('.session-empty');
-      if (note) note.textContent = empty; else list.append(node('p', 'session-empty', empty));
-    } else {
-      list.querySelector('.session-empty')?.remove();
-      syncChildren(list, this.entries.map(entry => this.updateRow(entry).item));
-    }
-    this.notice(page.unreadable ? `${page.unreadable} 个会话文件无法读取，未覆盖原文件；其他任务仍可打开。` : '已保存在宿主本地', page.unreadable > 0);
+    this.renderSidebar();
+    // Old or damaged files are omitted from navigation; only an attempted open needs a page error.
+    this.notice('已保存在宿主本地');
     this.notify();
   }
   async refresh() {
@@ -292,8 +395,11 @@ export class ConversationUI {
   title() {
     const title = this.selected?.title || '新任务';
     $('#project-context').textContent = this.selected?.metadata?.['project.name'] || this.project?.name || '';
-    $('#sessions-section-title').textContent = this.projectsEnabled ? this.project?.name || '普通任务' : '任务';
+    $('#sessions-section-title').textContent = this.showArchived ? '已归档任务' : '任务';
     $('#thread-title').textContent = title;
+    this.rememberTask();
+    $('#thread-more').hidden = !this.selected;
+    if (this.menuOpener === $('#thread-more')) this.closeMenu();
     if (this.selected) {
       // A fragment-only URL would resolve against index.html's <base>, not the current page.
       const url = new URL(location.href);
@@ -307,16 +413,37 @@ export class ConversationUI {
     const scopeChanged = this.project?.id !== project?.id;
     this.project = project;
     this.generation++; this.selected = null; this.pending = null; this.createKey = null;
-    if (scopeChanged) void this.refreshList().catch(e => this.notice(e.message,true));
+    this.nextBefore = null; this.historyLoading = false;
+    if (scopeChanged) this.renderSidebar();
     this.hooks.clear(); history.replaceState(null, '', location.pathname + location.search); this.title();
-    for (const button of $('#sessions-list').querySelectorAll('button')) { button.classList.remove('active'); button.removeAttribute('aria-current'); }
+    for (const button of $('#chat-sidebar').querySelectorAll('.session-row')) { button.classList.remove('active'); button.removeAttribute('aria-current'); }
     this.notify(); return true;
   }
   async selectProject(project) {
     if (!this.newChat(project)) return false;
     this.showArchived = false; this.syncArchivedChoice();
-    await this.refreshList().catch(e => this.notice(e.message, true));
     $('#prompt').focus(); return true;
+  }
+  async ensureSession() {
+    if (!this.persistent || this.loading || this.hooks.busy()) throw new Error('请等待会话就绪后再切换模式。');
+    if (this.selected) return this.selected;
+    const generation = this.generation; this.loading = true; this.notify();
+    try {
+      this.createKey ||= crypto.randomUUID();
+      const selected = await this.api.create(this.createKey, this.project?.id);
+      if (generation !== this.generation) throw new DOMException('会话连接已切换。', 'AbortError');
+      this.selected = selected; this.title();
+      await this.refreshList();
+      if (generation !== this.generation) throw new DOMException('会话连接已切换。', 'AbortError');
+      return this.selected;
+    } finally { if (generation === this.generation) { this.loading = false; this.notify(); } }
+  }
+  async refreshHeader(id) {
+    const generation = this.generation;
+    const page = await this.api.get(id, { limit: 1 });
+    if (generation !== this.generation || this.selected?.id !== id) return;
+    if (page.session.revision < this.selected.revision) return;
+    this.selected = page.session; this.title(); this.notify();
   }
   async submit(value) {
     if (!this.persistent || this.loading) throw new Error('会话尚未就绪。');
@@ -361,27 +488,24 @@ export class ConversationUI {
     if (this.loading || this.hooks.busy()) { this.notice('请先停止当前任务并等待结算，再切换会话。', true); return; }
     this.loading = true; const generation = ++this.generation; this.notify();
     try {
-      const page = await this.api.get(id, { before, limit: 10 });
+      const cursor = before === undefined ? this.hooks.historyBefore?.(id) : before;
+      let page = await this.api.get(id, { before: cursor ?? undefined, limit: 10 });
       if (generation !== this.generation) return;
+      if (cursor != null && page.session.status === 'running') page = await this.api.get(id, { limit: 10 });
+      if (generation !== this.generation) return;
+      this.hasNewer = cursor != null && cursor < page.session.turn_count && page.session.status !== 'running';
       const oldScope = this.project?.id;
       this.selected = page.session; this.pending = null;
       this.project = this.hooks.findProject?.(page.session.metadata?.['project.id']) || null;
       this.hooks.clear(); this.title();
-      if (oldScope !== this.project?.id) void this.refreshList().catch(e => this.notice(e.message,true));
+      if (oldScope !== this.project?.id) this.renderSidebar();
       if (this.selected.unread) this.markRead(this.selected);
-      const nav = node('div', 'history-pagination');
-      if (page.next_before != null) {
-        const older = node('button', 'text-button', '查看更早的 10 轮对话'); older.type = 'button';
-        older.addEventListener('click', () => { void this.open(id, page.next_before); }); nav.append(older);
-      }
-      if (before != null) {
-        const latest = node('button', 'text-button', '返回最新对话'); latest.type = 'button';
-        latest.addEventListener('click', () => { void this.open(id); }); nav.append(latest);
-      }
-      $('#timeline').append(nav);
+      this.nextBefore = page.next_before; this.historyLoading = false;
+      this.renderHistoryNavigation();
       for (const turn of page.turns) {
         if (generation !== this.generation) return;
-        const dom = this.hooks.createTurn(turn.prompt); dom.turn.dataset.turnId = turn.id;
+        const dom = this.hooks.createTurn(turn.prompt, { session: page.session, turn, history: true }); dom.turn.dataset.turnId = turn.id;
+        dom.turn.dataset.historyBefore = String((page.next_before || 0) + page.turns.length);
         if (turn.status === 'running' && turn.run_id) {
           await this.hooks.live(turn.run_id, dom);
         } else {
@@ -389,66 +513,133 @@ export class ConversationUI {
         }
       }
       if (page.session.status === 'interrupted') this.notice('上次进程已中断。已恢复确认过的记录；工具不会自动重跑，继续前请核对可能的外部影响。');
-      for (const button of $('#sessions-list').querySelectorAll('button')) {
+      this.hooks.historyOpened?.(id);
+      for (const button of $('#chat-sidebar').querySelectorAll('.session-row')) {
         const selected = button.dataset.sessionId === id; button.classList.toggle('active', selected);
         if (selected) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
       }
-    } catch (e) { if (e.name !== 'AbortError') this.notice(`读取会话失败：${e.message}`, true); }
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        if (e.status === 404) this.forgetTaskNavigation(id);
+        this.notice(`读取会话失败：${e.message}`, true);
+      }
+    }
     finally { if (generation === this.generation) { this.loading = false; this.notify(); } }
   }
+  renderHistoryNavigation() {
+    let nav = $('#timeline > .history-pagination');
+    if (!nav) { nav = node('div', 'history-pagination'); $('#timeline').prepend(nav); }
+    nav.replaceChildren();
+    if (this.hasNewer && this.selected) {
+      const latest = node('button', 'text-button', '返回最新对话'); latest.type = 'button'; latest.disabled = this.historyLoading;
+      latest.addEventListener('click', () => { const id = this.selected.id; this.hooks.forgetReading?.(id); void this.open(id, null); }); nav.append(latest);
+    }
+    if (this.nextBefore != null) {
+      const older = node('button', 'text-button', this.historyLoading ? '正在加载…' : '加载更早的对话'); older.type = 'button'; older.disabled = this.historyLoading;
+      older.addEventListener('click', () => { void this.loadOlder().catch(error => this.notice(error.message, true)); }); nav.append(older);
+    }
+  }
+  async loadOlder() {
+    if (this.nextBefore == null || this.historyLoading || this.loading || !this.selected) return false;
+    const id = this.selected.id, generation = this.generation, before = this.nextBefore;
+    this.historyLoading = true; this.renderHistoryNavigation();
+    try {
+      const page = await this.api.get(id, { before, limit: 10 });
+      if (generation !== this.generation || this.selected?.id !== id) return;
+      if (page.next_before != null && page.next_before >= before) throw new Error('历史分页游标没有前进，已停止加载。');
+      const first = $('#timeline .turn');
+      for (const turn of page.turns) {
+        if (generation !== this.generation) return;
+        if ($('#timeline').querySelector(`[data-turn-id="${CSS.escape(turn.id)}"]`)) continue;
+        const anchor = this.hooks.beforeHistoryChange?.();
+        const dom = this.hooks.createTurn(turn.prompt, { session: page.session, turn, history: true, before: first }); dom.turn.dataset.turnId = turn.id;
+        dom.turn.dataset.historyBefore = String((page.next_before || 0) + page.turns.length);
+        this.hooks.afterHistoryChange?.(anchor);
+        await this.loadTurn(id, turn, dom, generation);
+      }
+      this.nextBefore = page.next_before;
+      return true;
+    } finally {
+      if (generation === this.generation) { const anchor = this.hooks.beforeHistoryChange?.(); this.historyLoading = false; this.renderHistoryNavigation(); this.hooks.afterHistoryChange?.(anchor); }
+    }
+  }
   async loadTurn(id, turn, dom, generation, before = undefined) {
+    if (dom.historyLoading) return;
+    dom.historyLoading = true;
     try {
       const page = await this.api.turn(id, turn.id, { before });
       if (generation !== this.generation) return;
-      dom.update(page.snapshot);
+      if (before != null && page.next_before != null && page.next_before >= before) throw new Error('执行记录分页没有前进，请刷新后重试。');
+      const anchor = this.hooks.beforeHistoryChange?.();
+      if (before != null && dom.historySnapshot) {
+        const items = new Map([...page.snapshot.items, ...dom.historySnapshot.items].map(item => [item.id, item]));
+        page.snapshot.items = [...items.values()]; page.snapshot.pruned_items = Math.max(0, page.total_items - items.size);
+      }
+      dom.historySnapshot = page.snapshot; dom.update(page.snapshot);
+      dom.turn.querySelector('.history-load-error')?.remove();
+      await dom.answerReady;
+      if (generation !== this.generation || dom.disposed) return;
+      if (anchor) this.hooks.afterHistoryChange?.(anchor);
       dom.clock.textContent = turn.finished_at == null ? '历史记录' : `已工作 ${durationText(turn.finished_at - turn.started_at)}`;
       dom.clock.dataset.tooltip = '宿主记录的本轮开始与结束时间';
+      dom.setTimestamp(turn.finished_at || turn.started_at);
       dom.turn.querySelector('.history-tools-nav')?.remove();
       dom.turn.querySelector('.history-inputs')?.remove();
       const inputs = node('div', 'history-inputs');
       for (const value of page.supplemental_inputs) inputs.append(node('div', 'user-message supplement', value));
       dom.turn.append(inputs);
+      dom.setSupplemental(page.supplemental_inputs.length > 0);
       const nav = node('div', 'history-tools-nav');
       if (page.next_before != null) {
         const older = node('button', 'text-button', '查看更早的执行记录'); older.type = 'button';
         older.addEventListener('click', () => { older.disabled = true; void this.loadTurn(id, turn, dom, generation, page.next_before); }); nav.append(older);
       }
-      if (before != null) {
-        const latest = node('button', 'text-button', '返回本轮最新记录'); latest.type = 'button';
-        latest.addEventListener('click', () => { void this.loadTurn(id, turn, dom, generation); }); nav.append(latest);
-      }
       dom.turn.append(nav);
-    } catch (e) { if (e.name !== 'AbortError' && generation === this.generation) dom.fail(`历史记录读取失败：${e.message}`); }
+    } catch (e) {
+      if (e.name !== 'AbortError' && generation === this.generation) {
+        let note = dom.turn.querySelector('.history-load-error');
+        if (!note) { note = node('div', 'history-load-error'); note.setAttribute('role', 'status'); dom.turn.append(note); }
+        const retry = node('button', 'text-button', '重试读取'); retry.type = 'button';
+        retry.addEventListener('click', () => { retry.disabled = true; void this.loadTurn(id, turn, dom, generation, before); });
+        note.replaceChildren(node('span', '', `历史记录读取失败：${e.message}`), retry);
+      }
+    } finally { dom.historyLoading = false; for (const button of dom.turn.querySelectorAll('.history-tools-nav button,.history-load-error button')) button.disabled = false; }
   }
   busyForEdit() {
     if (this.loading || this.hooks.busy()) { this.notice('请先停止当前任务并等待结算。', true); return true; }
     return false;
   }
-  placeMenu(menu, anchor, event) {
+  placeMenu(menu, anchor, event, alignStart = false) {
     menu.hidden = false;
     const box = menu.getBoundingClientRect();
     const anchorBox = anchor.getBoundingClientRect();
     const point = event && Number.isFinite(event.clientX)
       ? { x: event.clientX, y: event.clientY }
-      : { x: anchorBox.right - box.width, y: anchorBox.bottom + SESSION_MENU_ANCHOR_GAP };
+      : { x: alignStart ? anchorBox.left : anchorBox.right - box.width, y: anchorBox.bottom + SESSION_MENU_ANCHOR_GAP };
     menu.style.left = `${Math.max(SESSION_MENU_VIEWPORT_GUTTER,
       Math.min(point.x, window.innerWidth - box.width - SESSION_MENU_VIEWPORT_GUTTER))}px`;
     menu.style.top = `${Math.max(SESSION_MENU_VIEWPORT_GUTTER,
       Math.min(point.y, window.innerHeight - box.height - SESSION_MENU_VIEWPORT_GUTTER))}px`;
   }
-  openMenu(entry, opener, anchor, event) {
+  openMenu(entry, opener, anchor, event, header = false) {
     const menu = $('#session-menu');
+    if (!menu.hidden && this.menuOpener === opener) { this.closeMenu(true); return; }
+    this.closeMenu();
     this.menuOpener = opener;
+    menu.classList.toggle('is-header', header);
     menu.replaceChildren();
-    for (const choice of this.menuChoices(entry)) {
+    for (const choice of header ? this.headerMenuChoices(entry) : this.menuChoices(entry)) {
+      if (choice.separator) { const separator = node('div', 'session-menu-separator'); separator.setAttribute('role', 'separator'); menu.append(separator); continue; }
       const button = node('button', `session-menu-item${choice.danger ? ' is-danger' : ''}`);
-      button.type = 'button'; button.setAttribute('role', 'menuitem');
-      button.append(icon(...choice.icon), node('span', '', choice.label));
+      button.type = 'button'; button.setAttribute('role', 'menuitem'); button.disabled = Boolean(choice.disabled);
+      if (choice.icon) button.append(icon(...choice.icon));
+      button.append(node('span', '', choice.label));
       button.addEventListener('click', () => { this.closeMenu(); void choice.run(); });
       menu.append(button);
     }
-    this.placeMenu(menu, anchor, event);
-    menu.querySelector('button')?.focus();
+    this.placeMenu(menu, anchor, event, header);
+    opener?.setAttribute('aria-expanded', 'true');
+    menu.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
   }
   // The section menu holds the list-wide actions: refresh and the archived view.
   openOptions() {
@@ -458,7 +649,7 @@ export class ConversationUI {
     this.syncArchivedChoice();
     this.placeMenu(menu, this.menuOpener);
     $('#sessions-options').setAttribute('aria-expanded', 'true');
-    menu.querySelector('button:not(:disabled)')?.focus();
+    menu.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
   }
   syncArchivedChoice() {
     const button = $('#sessions-archived');
@@ -477,6 +668,42 @@ export class ConversationUI {
       { label: '删除任务', icon: DELETE_PATHS, danger: true, run: () => this.removeEntry(entry) },
     ];
   }
+  headerMenuChoices(entry) {
+    const current = () => this.selected?.id === entry.id ? this.selected : entry;
+    const choices = [
+      { label: entry.pinned ? '取消置顶' : '置顶聊天', run: () => this.togglePin(current()) },
+      { label: '重命名任务', disabled: this.loading || this.hooks.busy(), run: () => this.renameEntry(current()) },
+      { label: entry.archived ? '取消归档' : '归档', run: async () => {
+        if (!entry.archived && !await this.confirmHeaderArchive(entry)) return;
+        if (this.selected?.id === entry.id) return this.toggleArchive(current());
+      } },
+      { label: entry.unread ? '标记为已读' : '标记为未读', run: () => this.toggleUnread(current()) },
+    ];
+    const hasFiles = !$('#workspace-files-open').hidden && Boolean(entry.workspace);
+    if (hasFiles || entry.workspace || entry.id) choices.push({ separator: true });
+    if (hasFiles) choices.push({ label: '打开任务文件夹', run: () => $('#workspace-files-open').click() });
+    if (entry.workspace) choices.push({ label: '复制工作区路径', run: () => this.copyHeaderText(entry.workspace, '工作区路径') });
+    if (entry.id) choices.push({ label: '复制会话 ID', run: () => this.copyHeaderText(entry.id, '会话 ID') });
+    return choices;
+  }
+  async copyHeaderText(value, label) {
+    try { await navigator.clipboard.writeText(value); this.notice(`已复制${label}。`); }
+    catch { this.notice(`无法复制${label}，请检查浏览器剪贴板权限。`, true); }
+  }
+  confirmHeaderArchive(entry) {
+    const dialog = $('#header-archive-dialog');
+    if (dialog.open) return Promise.resolve(false);
+    $('#header-archive-description').textContent = `归档“${entry.title}”？任务会从当前列表移出，可在已归档任务中恢复。`;
+    dialog.returnValue = '';
+    return new Promise(resolve => {
+      dialog.addEventListener('close', () => {
+        const confirmed = dialog.returnValue === 'archive';
+        if (!$('#thread-more').hidden) $('#thread-more').focus();
+        resolve(confirmed);
+      }, { once: true });
+      dialog.showModal(); dialog.querySelector('[value="cancel"]').focus();
+    });
+  }
   // Opening a task clears its mark. The write is best effort, and its new revision is kept so a
   // following turn or menu action does not collide with it.
   markRead(header) {
@@ -493,8 +720,9 @@ export class ConversationUI {
     const menu = $('#session-menu');
     const options = $('#sessions-options-menu');
     const open = !menu.hidden || !options.hidden;
-    if (!menu.hidden) { menu.hidden = true; menu.replaceChildren(); }
+    if (!menu.hidden) { menu.hidden = true; menu.replaceChildren(); menu.classList.remove('is-header'); }
     if (!options.hidden) { options.hidden = true; $('#sessions-options').setAttribute('aria-expanded', 'false'); }
+    this.menuOpener?.setAttribute('aria-expanded', 'false');
     if (restoreFocus && open && this.menuOpener?.isConnected) this.menuOpener.focus();
     this.menuOpener = null;
   }
@@ -516,7 +744,7 @@ export class ConversationUI {
       entry.pinned ? '已取消置顶。' : '已置顶该任务。');
   }
   toggleArchive(entry) {
-    const archived = !this.showArchived;
+    const archived = !entry.archived;
     return this.setFlag(entry, () => this.api.archive(entry.id, entry.revision, archived),
       archived ? '已归档该任务；可在任务列表操作里查看已归档。' : '已取消归档。');
   }
@@ -526,6 +754,7 @@ export class ConversationUI {
   }
   async toggleArchived() {
     this.showArchived = !this.showArchived;
+    this.groupLimits.clear(); this.title();
     this.syncArchivedChoice();
     this.notice(this.showArchived ? '正在显示已归档任务。' : '已返回当前任务。');
     try { await this.refreshList(); } catch (error) { this.notice(error.message, true); }
@@ -550,6 +779,7 @@ export class ConversationUI {
     this.loading = true; this.notify();
     try {
       await this.api.delete(entry.id, entry.revision);
+      this.forgetTaskNavigation(entry.id);
       if (this.selected?.id === entry.id) { this.loading = false; this.newChat(); this.loading = true; }
       await this.refreshList();
     } catch (error) { this.notice(error.message, true); }

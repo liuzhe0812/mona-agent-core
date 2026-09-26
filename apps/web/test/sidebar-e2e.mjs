@@ -51,7 +51,7 @@ async function connect(url) {
 const evaluate = expression => cdp.evaluate(expression);
 const waitPage = (expression, label) => waitFor(() => evaluate(expression), label);
 async function ready() {
-  await waitPage("document.querySelector('#sessions-notice')?.textContent.length > 0 && document.querySelector('#model-label')", 'formal UI connected');
+  await waitPage("document.querySelector('#sessions-notice')?.textContent.includes('未提供本地会话存储') && document.querySelector('#prompt')", 'formal UI connected');
 }
 async function launch() {
   const reservation = createServer();
@@ -129,6 +129,9 @@ try {
         && !sidebar.querySelector('.section-label') && !sidebar.querySelector('.project')
         && !sidebar.querySelector('#sessions-search');
     })()`));
+  check('task notices stay in the conversation area and the sidebar has no empty-task prompt',
+    await evaluate("!document.querySelector('#chat-sidebar #sessions-notice') && !document.querySelector('#chat-sidebar .session-empty') && document.querySelector('#chat-workspace #sessions-notice')?.textContent.includes('未提供本地会话存储')"));
+  check('navigation works without uninstalled model-management UI or placeholder controls', await evaluate("!document.querySelector('#model-button') && document.querySelector('#composer-ui-actions').hidden"));
   check('search is a dialog behind the brand button, not a sidebar row',
     await evaluate("document.querySelector('#search-button') !== null && !document.querySelector('#search-dialog').open"));
   check('the task header carries the section label, its collapse control and the section actions',
@@ -144,6 +147,10 @@ try {
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: headingSpot.x, y: headingSpot.y });
   await waitPage("getComputedStyle(document.querySelector('.sessions-heading-actions')).opacity === '1'", 'section actions revealed');
   check('the section actions appear when the header is hovered', true);
+  check('the task section uses the same drag grip as the project section', await evaluate("document.querySelector('#sessions-options').draggable && document.querySelector('#projects-sort').draggable && document.querySelector('#sessions-options svg').innerHTML===document.querySelector('#projects-sort svg').innerHTML"));
+  await click('#sessions-options');
+  check('clicking the task grip still opens refresh and archived views', await evaluate("!document.querySelector('#sessions-options-menu').hidden&&document.querySelector('#sessions-refresh')&&document.querySelector('#sessions-archived')"));
+  await press('Escape', 'Escape', 27);
   await click('#sessions-collapse');
   check('the collapse control hides the task list and remembers the choice',
     await evaluate("document.querySelector('.sessions-region').classList.contains('is-collapsed') && document.querySelector('#sessions-collapse').getAttribute('aria-expanded') === 'false' && localStorage.getItem('mona.web.tasks.v1') === '1'"));
@@ -152,6 +159,12 @@ try {
   await click('#sessions-collapse');
   check('expanding the task section clears the stored choice',
     await evaluate("!document.querySelector('.sessions-region').classList.contains('is-collapsed') && localStorage.getItem('mona.web.tasks.v1') === '0'"));
+  await evaluate("localStorage.setItem('mona.web.sidebar.sections.v1',JSON.stringify(['tasks','projects']))");
+  await cdp.send('Page.navigate', { url: origin }); await ready();
+  check('a saved section order is restored after reload', await evaluate("document.querySelector('.sidebar-navigation').firstElementChild.classList.contains('sessions-region')"));
+  await evaluate("localStorage.removeItem('mona.web.sidebar.sections.v1')");
+  await cdp.send('Page.navigate', { url: origin }); await ready();
+  check('without a saved order the project section stays first', await evaluate("document.querySelector('.sidebar-navigation').firstElementChild.id==='projects-region'"));
   check('the resizer is an exposed window splitter with current values',
     await evaluate("(() => {const r=document.querySelector('#sidebar-resizer');return r.getAttribute('role')==='separator' && r.tabIndex===0 && Number(r.getAttribute('aria-valuenow'))===264 && Number(r.getAttribute('aria-valuemin'))===208 && Number(r.getAttribute('aria-valuemax'))===460;})()"));
   check('the default sidebar is 264px wide', await sidebarWidth() === 264);
@@ -210,24 +223,32 @@ try {
     const composer = getComputedStyle(document.querySelector('.composer'));
     const field = getComputedStyle(document.querySelector('#prompt'));
     return document.activeElement===document.querySelector('#prompt')
-      && composer.outlineStyle==='none' && composer.boxShadow==='none'
+      && composer.outlineStyle==='none' && composer.boxShadow!=='none' && composer.borderRadius==='22px'
       && field.outlineStyle==='none' && field.boxShadow==='none';
   })()`));
   await screenshot('composer-focus');
 
+  await evaluate("document.querySelector('#sidebar-toggle').focus()"); await click('#sidebar-toggle');
+  check('collapsing moves the focused sidebar control before the workspace icon and title', await evaluate("(()=>{const toggle=document.querySelector('#sidebar-toggle'),heading=document.querySelector('.thread-heading');return getComputedStyle(document.querySelector('#sidebar-resizer')).display==='none'&&toggle.parentElement===heading&&heading.firstElementChild===toggle&&toggle.nextElementSibling.id==='header-workspace-context'&&heading.querySelector('#thread-title')&&toggle.getAttribute('aria-expanded')==='false'&&document.activeElement===toggle})()"));
+  await screenshot('sidebar-collapsed-topbar');
   await click('#sidebar-toggle');
-  check('collapsing the sidebar hides the resizer', await evaluate("getComputedStyle(document.querySelector('#sidebar-resizer')).display === 'none'"));
-  await click('#sidebar-toggle');
-  check('expanding the sidebar restores the chosen width', await sidebarWidth() === 224);
+  check('expanding returns the focused control after brand search without losing width', await sidebarWidth() === 224 && await evaluate("(()=>{const toggle=document.querySelector('#sidebar-toggle'),search=document.querySelector('#search-button');return toggle.parentElement===search.parentElement&&search.nextElementSibling===toggle&&toggle.getAttribute('aria-expanded')==='true'&&document.activeElement===toggle})()"));
+  await press('b', 'KeyB', 66, 2);
+  check('Ctrl+B collapses the sidebar through the same topbar control', await evaluate("document.querySelector('.shell').classList.contains('sidebar-collapsed')&&document.querySelector('#sidebar-toggle').parentElement===document.querySelector('.thread-heading')"));
+  await press('b', 'KeyB', 66, 2);
+  check('Ctrl+B restores the sidebar without changing its width', await sidebarWidth() === 224 && await evaluate("!document.querySelector('.shell').classList.contains('sidebar-collapsed')"));
 
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 900, deviceScaleFactor: 1, mobile: false });
-  await waitPage("matchMedia('(max-width: 680px)').matches && getComputedStyle(document.querySelector('#sidebar-resizer')).display === 'none' && document.querySelector('#sidebar-toggle').getBoundingClientRect().width > 0 && document.querySelector('#chat-sidebar').inert", 'mobile layout applied and responsive listener settled');
+  await waitPage("matchMedia('(max-width: 680px)').matches && getComputedStyle(document.querySelector('#sidebar-resizer')).display === 'none' && document.querySelector('#sidebar-toggle').getBoundingClientRect().width > 0 && document.querySelector('#sidebar-toggle').parentElement===document.querySelector('.thread-heading') && document.querySelector('#chat-sidebar').inert", 'mobile layout applied and responsive listener settled');
   await click('#sidebar-toggle');
   await waitPage("document.querySelector('.shell').classList.contains('sidebar-open')", 'mobile drawer opened');
-  check('the mobile drawer hides the resizer and keeps the task list reachable',
-    await evaluate("getComputedStyle(document.querySelector('#sidebar-resizer')).display === 'none' && !document.querySelector('#sessions-list').closest('aside').inert"));
+  check('the mobile drawer keeps the sidebar toggle beside search and the task list reachable',
+    await evaluate("getComputedStyle(document.querySelector('#sidebar-resizer')).display === 'none' && !document.querySelector('#sessions-list').closest('aside').inert && document.querySelector('#search-button').nextElementSibling===document.querySelector('#sidebar-toggle')"));
   await screenshot('sidebar-mobile-drawer');
   check('390px layout has no horizontal overflow', await evaluate("document.documentElement.scrollWidth<=390 && document.querySelector('.shell').scrollWidth<=390"));
+  await press('Escape', 'Escape', 27);
+  await waitPage("!document.querySelector('.shell').classList.contains('sidebar-open') && document.querySelector('#sidebar-toggle').parentElement===document.querySelector('.thread-heading')", 'mobile drawer closed');
+  check('closing the mobile drawer restores focus to its topbar control', await evaluate("document.activeElement===document.querySelector('#sidebar-toggle')"));
   check('no unhandled page exception occurred', errors.length === 0);
   await writeFile(join(output, 'result.json'), JSON.stringify({ passed: true, checks }, null, 2));
   console.log(`PASS ${checks.length} sidebar checks; screenshots in .tmp-verify/sidebar-browser-report`);

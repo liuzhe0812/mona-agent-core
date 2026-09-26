@@ -23,6 +23,8 @@ export class WorkspaceClient {
   configure(base, token) { this.clear(); this.#base = String(base).replace(/\/+$/, ''); this.#token = String(token || ''); }
   clear() { this.#generation++; for (const controller of this.#requests) controller.abort(); this.#requests.clear(); this.#base = ''; this.#token = ''; }
   get configured() { return Boolean(this.#base && this.#token); }
+  /** Owned connection for a resource whose close must target its original host. Never persisted. */
+  fork() { const client = new WorkspaceClient(); client.configure(this.#base, this.#token); return client; }
   async #request(path, { method = 'GET', body, signal, binary = false } = {}) {
     const responseLimit = binary ? 16 * 1024 * 1024 : MAX_RESPONSE;
     if (!this.configured) throw new Error('请先连接工作区宿主。');
@@ -64,9 +66,16 @@ export class WorkspaceClient {
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); this.#requests.delete(controller); }
   }
   workbenchCapabilities() { return this.#request('/api/workbench/capabilities'); }
+  statistics(id, signal) { return this.#request(`/api/workbench/session/${sessionId(id)}/statistics`, { signal }); }
   targetPath(target) {
     if (!['session', 'project'].includes(target?.kind)) throw new Error('工作区类型无效。');
     return `/api/workbench/${target.kind}/${sessionId(target.id)}`;
+  }
+  async stat(target, path, signal) {
+    relativePath(path);
+    const value = await this.#request(this.targetPath(target) + '/stat' + query({ path }), { signal });
+    if (value.path !== path || typeof value.name !== 'string' || !['file', 'directory', 'other'].includes(value.kind) || !Number.isSafeInteger(value.bytes) || value.bytes < 0) throw new Error('文件元数据响应无效。');
+    return value;
   }
   review(target, signal) { return this.#request(this.targetPath(target) + '/review', { signal }); }
   diff(target, path, staged, signal) { relativePath(path); return this.#request(this.targetPath(target) + '/diff' + query({ path, staged: Boolean(staged) }), { signal }); }
@@ -79,6 +88,7 @@ export class WorkspaceClient {
   settings() { return this.#request('/api/workspace-settings'); }
   saveRoot(revision, defaultRoot) { return this.#request('/api/workspace-settings', { method: 'PUT', body: { revision, default_root: defaultRoot } }); }
   projects() { return this.#request('/api/projects'); }
+  createProject(requestId, revision, name) { sessionId(requestId); return this.#request('/api/projects/create', { method: 'POST', body: { request_id: requestId, revision, name } }); }
   addProject(value) { sessionId(value.request_id); return this.#request('/api/projects', { method: 'POST', body: value }); }
   removeProject(id, revision) { return this.#request(`/api/projects/${sessionId(id)}/remove`, { method: 'POST', body: { revision } }); }
   async search(id, q, { limit = 100, signal } = {}) {

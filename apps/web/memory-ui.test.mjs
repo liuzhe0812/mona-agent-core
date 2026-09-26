@@ -15,6 +15,7 @@ function fixture() {
     return nodes.get(selector);
   } };
   const ui = Object.assign(Object.create(MemoryUI.prototype), {
+    $: selector => document.querySelector(selector),
     generation: 1, queryGeneration: 0, readGeneration: 0,
     hooks: { session: () => null }, api: { clear() {} }, render() {},
     state: { history_enabled: true, scopes: [] }, saving: null, searching: null,

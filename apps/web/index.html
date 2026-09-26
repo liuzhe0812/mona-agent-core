@@ -12,40 +12,38 @@
   <link rel="stylesheet" href="/apps/web/appearance.css">
   <link rel="stylesheet" href="/apps/web/workspace.css">
   <link rel="stylesheet" href="/apps/web/memory.css">
+  <link rel="stylesheet" href="/apps/web/ui/extensions.css">
+  <link rel="stylesheet" href="/apps/web/vendor/content/katex.css">
+  <link rel="stylesheet" href="/apps/web/conversation.css">
 </head>
 <body>
   <div class="shell">
     <aside id="chat-sidebar" class="sidebar" aria-label="任务导航">
-      <div class="brand"><span class="brand-mark">M</span><strong>Mona</strong><button id="search-button" class="icon-button" type="button" aria-label="搜索任务" aria-keyshortcuts="Control+K" aria-haspopup="dialog" aria-expanded="false"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg></button></div>
+      <div class="brand"><span class="brand-mark">M</span><button id="task-back" class="icon-button task-history-control" type="button" aria-label="返回上一个任务" aria-keyshortcuts="Control+[ Meta+[" data-tooltip="返回上一个任务（Ctrl+[）" disabled><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5-7 7 7 7M7 12h13"/></svg></button><button id="task-forward" class="icon-button task-history-control" type="button" aria-label="前进到下一个任务" aria-keyshortcuts="Control+] Meta+]" data-tooltip="前进到下一个任务（Ctrl+]）" disabled><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m10 5 7 7-7 7M17 12H4"/></svg></button><strong>Mona</strong><button id="search-button" class="icon-button" type="button" aria-label="搜索任务" aria-keyshortcuts="Control+K" aria-haspopup="dialog" aria-expanded="false"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg></button><button id="sidebar-toggle" class="icon-button" type="button" aria-label="收起侧栏" aria-keyshortcuts="Control+B Meta+B" aria-controls="chat-sidebar" aria-expanded="true"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button></div>
       <button id="new-chat" class="nav" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a9 9 0 0 1-9 9H4l-2 2v-11a9 9 0 0 1 19 0ZM8 11h8m-4-4v8"/></svg>新建任务<kbd>Ctrl N</kbd></button>
-      <section id="workspace-file-sidebar" class="workspace-file-sidebar" aria-label="工作区文件" hidden>
-        <header class="workspace-file-sidebar-head">
-          <button id="files-back-tasks" class="text-button" type="button"><span aria-hidden="true">‹</span> 返回任务</button>
-          <div><strong id="sidebar-workspace-name">文件</strong><button id="files-refresh" class="icon-button" type="button" aria-label="刷新文件" data-tooltip="刷新文件">↻</button></div>
-        </header>
-        <p id="workspace-path"></p>
-        <div class="workspace-file-search"><input id="files-search" type="search" placeholder="搜索文件" aria-label="搜索工作区文件" autocomplete="off"></div>
-        <div class="files-location"><button id="files-parent" class="icon-button" type="button" aria-label="上一级目录" data-tooltip="上一级目录" disabled>↑</button><span id="files-current">/</span></div>
-        <div id="files-tree" aria-label="目录文件"></div>
-        <button id="files-more" class="text-button" type="button" hidden>加载更多文件</button>
-        <p id="files-notice" role="status"></p>
-      </section>
+      <div class="sidebar-navigation">
       <section id="projects-region" class="projects-region" aria-label="项目" hidden>
-        <div class="projects-heading"><strong>项目</strong><button id="project-add" class="icon-button" type="button" aria-label="添加项目" data-tooltip="添加项目">＋</button></div>
-        <div id="project-list"></div><p id="projects-notice" role="status"></p>
+        <div class="projects-heading">
+          <button id="projects-collapse" class="projects-label" type="button" aria-expanded="true" aria-controls="project-list"><span>项目</span><svg class="line-icon chevron-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+          <div class="projects-heading-actions">
+            <button id="projects-sort" class="icon-button" type="button" draggable="true" data-section-handle="projects" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" aria-label="拖动项目分区；点击调整项目行顺序" aria-pressed="false" data-tooltip="拖动项目分区；点击调整项目行顺序"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01"/></svg></button>
+            <button id="project-add" class="icon-button" type="button" aria-label="添加项目" data-tooltip="添加项目"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16"/></svg></button>
+          </div>
+        </div>
+        <div id="project-list"></div>
       </section>
       <div class="sessions-region">
         <div class="sessions-heading">
           <button id="sessions-collapse" class="sessions-label" type="button" aria-expanded="true" aria-controls="sessions-list"><span id="sessions-section-title">任务</span><svg class="line-icon chevron-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
           <div class="sessions-heading-actions">
-            <button id="sessions-options" class="icon-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="sessions-options-menu" aria-label="任务列表操作" data-tooltip="任务列表操作"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg></button>
+            <button id="sessions-options" class="icon-button" type="button" draggable="true" data-section-handle="tasks" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" aria-haspopup="menu" aria-expanded="false" aria-controls="sessions-options-menu" aria-label="拖动任务分区；点击打开列表操作" data-tooltip="拖动任务分区；点击打开列表操作"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01"/></svg></button>
             <button id="workspace-files-open" class="icon-button" type="button" aria-label="查看文件" data-tooltip="查看文件" hidden><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v12H3Z"/></svg></button>
             <button id="sessions-new" class="icon-button" type="button" aria-label="新建任务" data-tooltip="新建任务"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11.5 4.5h8v15h-15v-15h4"/><path d="M15.5 3.5 20 8l-8.5 8.5H7v-4.5z"/></svg></button>
           </div>
         </div>
         <div id="sessions-list" class="sessions-list" aria-label="本地任务记录"></div>
-        <button id="sessions-more" class="text-button" type="button" hidden>加载更多</button>
-        <p id="sessions-notice" class="sessions-notice" role="status" aria-live="polite"></p>
+        <button id="sessions-more" class="text-button" type="button" hidden>显示更多</button>
+      </div>
       </div>
       <div class="sidebar-foot"><button id="settings-button" class="nav" type="button"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3-1 3-3 1-2 3 2 2v3l3 1 1 3h4l1-3 3-1 2-3-2-2V8l-3-1-1-4Z"/><circle cx="10" cy="11" r="3"/></svg>设置</button></div>
     </aside>
@@ -54,8 +52,19 @@
 
     <section id="chat-workspace" class="workspace">
       <header class="topbar">
-        <div class="thread-heading"><button id="sidebar-toggle" class="icon-button" type="button" aria-label="切换侧栏" aria-controls="chat-sidebar" aria-expanded="true"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button><strong id="thread-title">新任务</strong></div>
-        <button id="files-toggle" class="icon-button" type="button" aria-label="切换右侧面板" aria-controls="files-panel" aria-expanded="false" data-tooltip="切换右侧面板"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
+        <div class="thread-heading">
+          <button id="header-workspace-context" class="icon-button" type="button" aria-label="工作区信息" aria-expanded="false" aria-controls="header-workspace-popover" hidden><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v12H3Z"/></svg></button>
+          <strong id="thread-title">新任务</strong>
+          <button id="thread-more" class="icon-button" type="button" aria-label="任务操作" aria-haspopup="menu" aria-expanded="false" aria-controls="session-menu" data-tooltip="任务操作" hidden><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg></button>
+        </div>
+        <div class="topbar-actions">
+          <div id="header-open-group" class="header-open-group" hidden>
+            <button id="header-open-workspace" type="button" aria-label="在当前工作区打开资源管理器" data-tooltip="在当前工作区打开资源管理器"><svg class="header-folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path class="header-folder-tab" d="M2 5h7l2 2h11v3H2Z"/><path class="header-folder-body" d="M2 9h20v10H2Z"/><path class="header-folder-front" d="M4 12h16v8H4Z"/></svg></button>
+            <button id="header-open-options" type="button" aria-label="选择工作区打开方式" aria-haspopup="menu" aria-expanded="false" aria-controls="header-open-menu" data-tooltip="选择工作区打开方式"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+          </div>
+          <button id="header-terminal" class="icon-button" type="button" aria-label="终端" aria-keyshortcuts="Control+J Meta+J" aria-pressed="false" data-tooltip="终端（Ctrl+J）" hidden><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m6.5 9 3 3-3 3M12 16h5"/></svg></button>
+          <button id="files-toggle" class="icon-button" type="button" aria-label="切换右侧面板" aria-keyshortcuts="Control+Alt+B Meta+Alt+B" aria-controls="files-panel" aria-expanded="false" data-tooltip="切换右侧面板（Ctrl+Alt+B）"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
+        </div>
       </header>
 
       <nav id="conversation-rail" class="conversation-rail" aria-label="会话轮次导航" hidden>
@@ -66,30 +75,46 @@
         </aside>
       </nav>
       <main id="main" class="main">
-        <section id="welcome" class="welcome">
-          <h1>我们要一起完成什么？</h1>
-          <p>从一个想法开始，把下一步交给 Mona。</p>
-          <div class="suggestions">
-            <button type="button" data-prompt="请帮我梳理这个想法的目标、使用场景和第一版范围：\n\n">梳理一个想法<small>把灵感变成清晰方向</small></button>
-            <button type="button" data-prompt="请分析下面这段代码的职责、潜在问题和改进建议：\n\n">分析一段代码<small>理解结构，找到改进点</small></button>
-            <button type="button" data-prompt="请把这个任务拆成可执行步骤，并给出每一步的验收条件：\n\n">制定执行计划<small>将复杂任务拆成下一步</small></button>
-          </div>
-        </section>
-        <section id="timeline" class="timeline" aria-live="polite"></section>
+        <section id="timeline" class="timeline" aria-label="对话记录"></section>
       </main>
 
       <footer class="composer-wrap">
-        <div class="composer">
-          <p id="project-context"></p>
-          <textarea id="prompt" rows="3" aria-label="任务内容" placeholder="描述你希望完成的任务…"></textarea>
-          <div class="composer-row">
-            <div class="composer-actions">
-              <button id="model-button" type="button"><span id="model-label">选择模型</span><span aria-hidden="true">⌄</span></button>
-              <button id="cancel" class="secondary" type="button" hidden>停止</button>
-              <button id="send" class="send" type="button" aria-label="发送任务">↑</button>
+        <section id="welcome" class="welcome" aria-label="新任务">
+          <span class="brand-mark" aria-hidden="true">M</span><h1>Mona</h1>
+        </section>
+        <div id="composer-ui-dock" class="composer-ui-dock" hidden></div>
+        <div class="composer-frame">
+          <div class="composer-context">
+            <div class="project-chip" hidden>
+              <button id="project-picker" class="project-picker" type="button" aria-label="选择项目" aria-expanded="false" aria-controls="composer-project-menu"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v12H3Z"/></svg><span id="project-context"></span><svg class="line-icon project-picker-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+              <button id="project-detach" class="project-detach" type="button" aria-label="不在项目中工作" hidden>×</button>
+            </div>
+            <div id="composer-project-menu" class="composer-project-menu" role="menu" aria-label="选择项目" hidden>
+              <label class="project-menu-search"><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg><input id="project-menu-search" type="search" placeholder="搜索工作区" aria-label="搜索工作区" autocomplete="off"></label>
+              <div id="project-menu-list" class="project-menu-list" role="group" aria-label="项目列表"></div>
+              <div class="project-menu-separator" role="separator"></div>
+              <div id="project-menu-actions" class="project-menu-actions" role="group" aria-label="项目操作"></div>
+            </div>
+          </div>
+          <div class="composer">
+            <div id="composer-command-menu" class="composer-command-menu" role="menu" aria-label="更多操作" hidden></div>
+            <div class="composer-draft"><textarea id="prompt" rows="1" aria-label="任务内容" placeholder="描述你想完成的任务…"></textarea></div>
+            <div class="composer-row">
+              <div class="composer-leading">
+                <button id="composer-add" class="composer-add" type="button" aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" aria-controls="composer-command-menu" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11"/></svg></button>
+                <div id="composer-ui-modes" class="composer-ui-modes" hidden></div>
+              </div>
+              <div class="composer-actions">
+                <div id="composer-ui-actions" class="composer-ui-actions" hidden></div>
+                <button id="cancel" class="secondary" type="button" hidden>停止</button>
+                <button id="send" class="send" type="button" aria-label="发送任务"><svg class="line-icon send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V4m-7 7 7-7 7 7"/></svg><svg class="line-icon send-add" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+              </div>
             </div>
           </div>
         </div>
+        <div id="conversation-status-slots" class="conversation-status-slots" hidden></div>
+        <p id="sessions-notice" class="sessions-notice" role="status" aria-live="polite"></p>
+        <p id="projects-notice" role="status" aria-live="polite"></p>
         <p class="hint">Enter 发送 · Shift + Enter 换行</p>
       </footer>
     </section>
@@ -235,6 +260,11 @@
   </div>
 
   <div id="session-menu" class="session-menu" role="menu" aria-label="任务操作" hidden></div>
+  <div id="header-workspace-popover" class="header-workspace-popover" role="group" aria-label="工作区信息" hidden></div>
+  <div id="header-open-menu" class="session-menu header-open-menu" role="menu" aria-label="工作区打开方式" hidden></div>
+  <dialog id="header-archive-dialog" aria-labelledby="header-archive-title">
+    <form method="dialog"><div class="dialog-head"><h2 id="header-archive-title">归档任务</h2></div><p id="header-archive-description" class="dialog-copy"></p><div class="dialog-actions"><button class="secondary" type="submit" value="cancel">取消</button><button class="primary" type="submit" value="archive">归档</button></div></form>
+  </dialog>
   <div id="sessions-options-menu" class="session-menu" role="menu" aria-label="任务列表操作" hidden>
     <button id="sessions-refresh" class="session-menu-item" type="button" role="menuitem">刷新列表</button>
     <button id="sessions-archived" class="session-menu-item" type="button" role="menuitem" aria-pressed="false">显示已归档任务</button>
@@ -309,10 +339,11 @@
   </dialog>
 
   <dialog id="project-dialog" aria-labelledby="project-dialog-title">
-    <form id="project-form"><div class="dialog-head"><h2 id="project-dialog-title">添加项目</h2></div>
-      <label>项目目录<input id="project-path" type="text" placeholder="宿主上的绝对目录路径" autocomplete="off" spellcheck="false" required></label>
-      <label>项目名称<input id="project-name" type="text" maxlength="80" required></label>
-      <p id="project-error" class="error" role="alert"></p><div class="dialog-actions"><button id="project-cancel" class="secondary" type="button">取消</button><button id="project-save" class="primary" type="submit">添加</button></div>
+    <form id="project-form"><div class="dialog-head"><h2 id="project-dialog-title">新建项目</h2></div>
+      <p class="dialog-copy">项目文件夹会创建在默认工作区。</p>
+      <label>项目名称<input id="project-name" type="text" maxlength="80" autocomplete="off" required></label>
+      <p id="project-error" class="error" role="alert"></p>
+      <div class="dialog-actions"><button id="project-cancel" class="secondary" type="button">取消</button><button id="project-save" class="primary" type="submit">创建项目</button></div>
     </form>
   </dialog>
 

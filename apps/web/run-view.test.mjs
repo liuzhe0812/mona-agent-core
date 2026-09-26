@@ -64,19 +64,19 @@ test('an intermediate message with text stays in the process', () => {
   assert.deepEqual(result.process.map(item => item.id), ['step-1-message', 'step-1-tool-0']);
 });
 
-test('same-step tool calls collapse into one block while other items stay standalone', () => {
+test('consecutive work forms a process group and visible replies separate groups', () => {
   const blocks = itemBlocks([
     toolCall('step-1-tool-0', 1),
     toolCall('step-1-tool-1', 1),
     message('step-1-message', '说明'),
     toolCall('step-2-tool-0', 2),
   ]);
-  assert.deepEqual(blocks.map(block => [block.key, block.items.length]), [['step-1', 2], [null, 1], [null, 1]]);
+  assert.deepEqual(blocks.map(block => [block.key, block.items.length]), [['work-step-1-tool-0', 2], [null, 1], ['work-step-2-tool-0', 1]]);
 });
 
-test('items without a step are never merged into a group', () => {
+test('work grouping does not depend on optional model step labels or tool categories', () => {
   const blocks = itemBlocks([tool, toolCall('step-3-tool-0', 3)]);
-  assert.deepEqual(blocks.map(block => [block.key, block.items.length]), [[null, 1], [null, 1]]);
+  assert.deepEqual(blocks.map(block => [block.key, block.items.length]), [['work-tool', 2]]);
 });
 
 test('redacted outcome errors use safe code-specific guidance', () => {
@@ -88,6 +88,7 @@ test('redacted outcome errors use safe code-specific guidance', () => {
   assert.equal(outcomeErrorText({ code: 'model_rate_limit', message }), '模型服务正在限流，请稍后重试或降低请求频率。');
   assert.equal(outcomeErrorText({ code: 'model_server', message }), '供应商服务暂时不可用，请稍后重试。');
   assert.equal(outcomeErrorText({ code: 'model_context_window', message }), '请求超出模型上下文上限，请减少上下文或改用更大窗口的模型。');
+  assert.equal(outcomeErrorText({ code: 'configuration', message }), '运行配置有误，请检查模型设置、工作区和 Agent 组件配置。');
 });
 
 test('non-redacted outcome errors remain unchanged', () => {

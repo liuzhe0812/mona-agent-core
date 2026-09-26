@@ -26,16 +26,18 @@ export function previewText(value, fallback) {
     : `${valueText.slice(0, MAX_PREVIEW_CHARS - 3).trimEnd()}...`;
 }
 
-const main = globalThis.document?.querySelector('#main');
-const timeline = globalThis.document?.querySelector('#timeline');
-const rail = globalThis.document?.querySelector('#conversation-rail');
-const workspace = rail?.parentElement;
-const marksRoot = rail?.querySelector('.conversation-rail-marks');
-const preview = rail?.querySelector('.conversation-rail-preview');
-const previewTitle = rail?.querySelector('.conversation-rail-preview-title');
-const previewTextNode = rail?.querySelector('.conversation-rail-preview-text');
-
-if (main && timeline && rail && workspace && marksRoot && preview && previewTitle && previewTextNode) {
+export function mountConversationRail(ctx) {
+  const main = document.querySelector('#main');
+  const timeline = document.querySelector('#timeline');
+  const rail = document.querySelector('#conversation-rail');
+  const workspace = rail?.parentElement;
+  const marksRoot = rail?.querySelector('.conversation-rail-marks');
+  const preview = rail?.querySelector('.conversation-rail-preview');
+  const previewTitle = rail?.querySelector('.conversation-rail-preview-title');
+  const previewTextNode = rail?.querySelector('.conversation-rail-preview-text');
+  if (!main || !timeline || !rail || !workspace || !marksRoot || !preview || !previewTitle || !previewTextNode) {
+    throw new Error('会话轮次导航模板不完整。');
+  }
   const marks = new Map();
   let frame = 0;
   let interactionIndex;
@@ -173,25 +175,27 @@ if (main && timeline && rail && workspace && marksRoot && preview && previewTitl
     const slot = document.createElement('div');
     slot.className = 'conversation-rail-slot';
     const mark = document.createElement('button');
+    const controller = new AbortController();
+    item.controller = controller;
     mark.type = 'button';
     mark.className = 'conversation-rail-mark is-idle';
     mark.addEventListener('pointerenter', () => {
       setInteraction(orderedItems.indexOf(item));
       schedulePreview(item);
-    });
+    }, { signal: controller.signal });
     mark.addEventListener('pointerleave', () => {
       setInteraction(undefined);
       scheduleHidePreview();
-    });
+    }, { signal: controller.signal });
     mark.addEventListener('focus', () => {
       setInteraction(orderedItems.indexOf(item));
       showPreview(item);
-    });
+    }, { signal: controller.signal });
     mark.addEventListener('blur', () => {
       setInteraction(undefined);
       scheduleHidePreview();
-    });
-    mark.addEventListener('click', () => jumpTo(item));
+    }, { signal: controller.signal });
+    mark.addEventListener('click', () => jumpTo(item), { signal: controller.signal });
     slot.append(mark);
     item.slot = slot;
     item.mark = mark;
@@ -203,6 +207,7 @@ if (main && timeline && rail && workspace && marksRoot && preview && previewTitl
     const live = new Set(liveQueries.map(item => item.query));
     for (const [query, item] of marks) {
       if (!live.has(query)) {
+        item.controller.abort();
         item.slot.remove();
         marks.delete(query);
         if (previewTarget === query) hidePreview();
@@ -256,24 +261,41 @@ if (main && timeline && rail && workspace && marksRoot && preview && previewTitl
     rail.classList.toggle('is-wide', workspace.clientWidth >= NAVIGATOR_MIN_WIDTH_PX);
   }
 
-  new MutationObserver(schedule).observe(timeline, { childList: true, subtree: true, characterData: true });
+  const mutations = new MutationObserver(schedule);
+  mutations.observe(timeline, { childList: true, subtree: true, characterData: true });
   const resizeObserver = new ResizeObserver(() => {
     syncWidth();
     schedule();
   });
   resizeObserver.observe(main);
   resizeObserver.observe(workspace);
-  marksRoot.addEventListener('pointerleave', () => setInteraction(undefined));
-  marksRoot.addEventListener('scroll', () => {
+  ctx.listen(marksRoot, 'pointerleave', () => setInteraction(undefined));
+  ctx.listen(marksRoot, 'scroll', () => {
     setInteraction(undefined);
     hidePreview();
   }, { passive: true });
-  main.addEventListener('scroll', () => {
+  ctx.listen(main, 'scroll', () => {
     setInteraction(undefined);
     hidePreview();
     syncActive();
   }, { passive: true });
-  window.addEventListener('resize', schedule);
+  ctx.listen(window, 'resize', schedule);
   syncWidth();
   schedule();
+  return () => {
+    if (frame) cancelAnimationFrame(frame);
+    clearPreviewTimers();
+    mutations.disconnect();
+    resizeObserver.disconnect();
+    for (const item of marks.values()) item.controller.abort();
+    marks.clear();
+    orderedItems = [];
+    marksRoot.replaceChildren();
+    preview.hidden = true;
+    previewTitle.textContent = '';
+    previewTextNode.textContent = '';
+    rail.hidden = true;
+    rail.classList.remove('is-wide', 'is-interacting');
+    delete rail.dataset.itemCount;
+  };
 }

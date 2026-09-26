@@ -156,9 +156,15 @@ try {
   check('session navigation preserves the reloadable entry URL despite HTML base', await evaluate("location.pathname==='/' && location.hash.startsWith('#session=')"));
   await stop(host); await startHost(origin); await send('Page.reload',{ignoreCache:true});
   await waitPage("document.querySelectorAll('#timeline .turn').length===1 && document.querySelector('#timeline').textContent.includes('31415') && !document.querySelector('#sessions-refresh').disabled", 'history after real restart');
+  await evaluate("document.querySelectorAll('#timeline .execution-process,#timeline .activity-group,#timeline .activity-item').forEach(node=>node.open=true)");
+  await waitPage("document.querySelector('#timeline').textContent.includes('SESSION_TEST_FILE_31415')", 'expanded retained tool result');
   check('history and tool results are visible after process restart', (await evaluate("document.querySelector('#timeline').textContent")).includes('SESSION_TEST_FILE_31415'));
   await submit('继续：之前的编号是什么？'); await saved(2);
-  check('continuation sends original user, assistant and tool-result history', requests.at(-1).messages.some(m => m.role === 'tool' && String(m.content).includes('SESSION_TEST_FILE_31415')) && requests.at(-1).messages.filter(m=>m.role==='user').length===2);
+  check('continuation sends original user, assistant and tool-result history',
+    requests.at(-1).messages.some(m => m.role === 'tool' && String(m.content).includes('SESSION_TEST_FILE_31415'))
+    && requests.at(-1).messages.some(m => m.role === 'user' && String(m.content).includes('请读取 fixture.txt 并记住编号31415'))
+    && requests.at(-1).messages.some(m => m.role === 'user' && String(m.content).includes('继续：之前的编号是什么？'))
+    && requests.at(-1).messages.some(m => m.role === 'assistant'));
   dialogText = '重启验证会话';
   // Rename now lives in the row menu; the topbar buttons were removed with the sidebar rework.
   await evaluate(`(() => {const item=document.querySelectorAll('#sessions-list .session-item')[0];const box=item.getBoundingClientRect();
@@ -249,13 +255,14 @@ try {
   check('the section menu carries refresh and the archived view',
     await evaluate("document.querySelector('#sessions-archived').textContent === '显示已归档任务' && document.querySelector('#sessions-options-menu #sessions-refresh') !== null"));
   await evaluate("document.querySelector('#sessions-archived').click()");
-  await waitPage("document.querySelector('#sessions-list .session-row') !== null", 'archived view listed');
+  await waitPage("document.querySelector('#sessions-list .session-row') !== null && document.querySelector('#sessions-notice').textContent==='已保存在宿主本地'", 'archived view listed');
   check('the archived view lists the task and its menu offers to restore it',
     await evaluate("document.querySelector('#sessions-archived').textContent === '隐藏已归档任务' && document.querySelector('#sessions-list .session-item') !== null"));
   await evaluate("document.querySelector('#sessions-list .session-item .action-more').click()");
-  await waitPage("document.querySelectorAll('#session-menu .session-menu-item')[2].textContent.includes('取消归档')", 'unarchive entry');
+  await waitPage("document.querySelectorAll('#session-menu .session-menu-item')[2]?.textContent.includes('取消归档')", 'unarchive entry');
   await evaluate("document.querySelectorAll('#session-menu .session-menu-item')[2].click()");
   await waitFor(async () => (await api('/api/sessions')).sessions.length === 1, 'unarchive persisted');
+  await waitPage("document.querySelector('#sessions-notice').textContent.includes('已取消归档') && document.querySelector('#sessions-list .session-row')===null", 'unarchive view refreshed');
   await evaluate("document.querySelector('#sessions-options').click()"); await waitPage("!document.querySelector('#sessions-options-menu').hidden", 'section menu again');
   await evaluate("document.querySelector('#sessions-archived').click()");
   await waitPage("document.querySelector('#sessions-list .session-row') !== null", 'active view restored');
@@ -324,7 +331,7 @@ try {
   check('durable request dedup survives process death', repeated.reused && requests.length===beforeRestart);
   await evaluate("document.querySelector('#new-chat').click()");
   await submit('这是一个隔离的新会话'); await saved(1);
-  check('new conversations do not inherit another conversation history', requests.at(-1).messages.filter(m=>m.role==='user').length===1 && !JSON.stringify(requests.at(-1).messages).includes('31415'));
+  check('new conversations do not inherit another conversation history', requests.at(-1).messages.some(m=>m.role==='user'&&String(m.content).includes('这是一个隔离的新会话')) && !JSON.stringify(requests.at(-1).messages).includes('31415'));
   await evaluate(`(() => {
     const item = [...document.querySelectorAll('#sessions-list .session-item')].find(node => node.querySelector('.session-row[aria-current="page"]'));
     const box = item.getBoundingClientRect();
@@ -334,6 +341,7 @@ try {
   await evaluate("document.querySelectorAll('#session-menu .session-menu-item')[4].click()");
   await waitFor(async()=> (await api('/api/sessions')).sessions.length===1,'delete persisted');
   check('deletion removes only the selected conversation', (await api('/api/sessions')).sessions[0].id===sessionId);
+  await waitPage("document.querySelectorAll('#sessions-list .session-row').length===1&&!document.querySelector('#sessions-refresh').disabled", 'deleted task removed from navigation');
   await evaluate("document.querySelector('#search-button').click()");
   await waitPage("document.querySelector('#search-dialog').open && document.querySelectorAll('#search-results .search-result').length===1", 'task search dialog');
   check('the brand search button opens the task search dialog over the loaded list', true);
@@ -350,7 +358,7 @@ try {
 } catch (error) {
   console.error(error); console.error(hostLog);
   if (socket?.readyState===WebSocket.OPEN) {
-    console.error(await evaluate("JSON.stringify({url:location.href,body:document.body?.innerText.slice(0,4000),notice:document.querySelector('#sessions-notice')?.textContent,errors:window.__sessionErrors})").catch(()=> 'no page diagnostics'));
+    console.error(await evaluate("JSON.stringify({url:location.href,body:document.body?.innerText.slice(0,4000),notice:document.querySelector('#sessions-notice')?.textContent,menu:{hidden:document.querySelector('#session-menu')?.hidden,text:document.querySelector('#session-menu')?.textContent,optionsHidden:document.querySelector('#sessions-options-menu')?.hidden,opener:document.querySelector('#sessions-list .action-more')?.getAttribute('aria-expanded')},errors:window.__sessionErrors})").catch(()=> 'no page diagnostics'));
     await screenshot('failure').catch(()=>{});
   }
   await writeFile(join(output,'result.json'),JSON.stringify({passed:false,checks,error:String(error),errors},null,2));

@@ -4,11 +4,11 @@ export const MAX_THEME_BYTES = 32 * 1024;
 export const FONT_SIZES = Object.freeze([14, 15, 16, 18]);
 export const MODES = Object.freeze({ light: '浅色', dark: '深色', system: '跟随系统' });
 export const SHAPES = Object.freeze({ standard: '标准', soft: '柔和', crisp: '利落' });
-export const DEFAULT_APPEARANCE = Object.freeze({ version: 1, skin: 'graphite', mode: 'light', fontSize: 15, shape: 'standard', custom: null });
+export const DEFAULT_APPEARANCE = Object.freeze({ version: 1, skin: 'graphite', mode: 'light', fontSize: 14, shape: 'standard', custom: null });
 
 const light = {
   bg: '#f8f8f8', panel: '#ffffff', text: '#303030', muted: '#606060', line: '#dedede', soft: '#efefef',
-  accent: '#171717', sidebar: '#ececec', selected: '#dedede', danger: '#a53030', success: '#236b43',
+  accent: '#171717', sidebar: '#ececee', selected: '#dedede', danger: '#a53030', success: '#236b43',
   'switch-on': '#345fc6', focus: '#315ecc', inverse: '#ffffff', 'activity-shimmer': '#ffffff',
 };
 const dark = {
@@ -127,9 +127,9 @@ export function paintPalette(element, palette, preference) {
   // Mona's visible-layer tiers are the default. Softer/crisper options remain bounded variants,
   // not permission for each feature to invent its own radii.
   const [composer, bubble, panel, detail] = {
-    standard: [12, 12, 12, 8],
-    soft: [18, 16, 16, 12],
-    crisp: [8, 8, 8, 8],
+    standard: [22, 12, 12, 8],
+    soft: [28, 16, 16, 12],
+    crisp: [12, 8, 8, 8],
   }[preference.shape];
   for (const [key, value] of Object.entries({ composer, bubble, panel, detail })) element.style.setProperty(`--skin-${key}-radius`, `${value}px`);
   element.style.setProperty('--switch-thumb', palette.inverse);

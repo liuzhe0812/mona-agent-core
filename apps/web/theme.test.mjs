@@ -37,6 +37,7 @@ test('a fresh browser uses the neutral default without writing to storage', () =
   assert.deepEqual(manager.value, DEFAULT_APPEARANCE);
   assert.equal(root.dataset.theme, 'light'); assert.equal(root.dataset.skin, 'graphite');
   assert.equal(storage.writes, 0); assert.equal(root.dataset.untouched, 'task');
+  assert.equal(setup().properties.get('--skin-composer-radius'), '22px');
 });
 
 test('selected palette, mode, font size and shape survive a new manager instance', () => {
@@ -46,7 +47,7 @@ test('selected palette, mode, font size and shape survive a new manager instance
   assert.deepEqual(restored.manager.value, manager.value);
   assert.equal(restored.properties.get('--bg'), SKINS[1].dark.bg);
   assert.equal(restored.properties.get('--chat-font-size'), '18px');
-  assert.equal(restored.properties.get('--skin-composer-radius'), '18px');
+  assert.equal(restored.properties.get('--skin-composer-radius'), '28px');
   assert.equal(restored.properties.get('--skin-bubble-radius'), '16px');
   assert.equal(restored.properties.get('--skin-panel-radius'), '16px');
   assert.equal(restored.properties.get('--skin-detail-radius'), '12px');
