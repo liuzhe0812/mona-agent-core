@@ -1,0 +1,1 @@
+{"version":1,"id":"multiturn","title":"当前会话跨轮记忆","suite":"conversation","requires":["text","multiturn"],"turns":[{"prompt":"Remember project code MONA_CONTEXT_731. Do not write it to any file."},{"prompt":"What project code did I ask you to remember? Reply with only that code."}],"checks":[{"type":"contains","value":"MONA_CONTEXT_731","turn":1}]}

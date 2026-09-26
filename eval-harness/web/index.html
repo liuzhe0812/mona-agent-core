@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Eval Harness · Agent 测评</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header><div class="brand"><span class="mark">E</span><strong>Eval Harness</strong><span class="muted">Agent 测评工作台</span></div><div class="actions"><span id="connection" role="status">连接中…</span><button id="theme" type="button" aria-label="切换深浅主题">切换主题</button><button id="refresh" type="button">刷新</button></div></header>
+<div id="error" role="alert" hidden></div>
+<div class="layout">
+<aside><div class="side-title"><h2>运行记录</h2><button id="new-run" type="button">新建测评</button></div><div id="history" aria-label="历史测评"></div><button id="more" type="button" hidden>加载更多</button><p class="muted">数据保存在本机。中断的测评不会自动重跑。</p></aside>
+<main>
+<section id="configuration"><div class="section-heading"><h1>创建测评</h1><span class="badge">独立运行 · 不依赖 Mona Web</span></div>
+<p class="muted">相同任务、相同限制，比较实际结果。免费自检用于检查测评引擎，不代表模型能力。</p>
+<form id="run-form">
+<div class="form-grid"><label>被测 Agent<select id="adapter" name="adapter" required></select></label><label>模型配置<select id="model" name="model" required></select></label><label>任务集<select id="suite" name="suite" required><option value="all">全部任务</option></select></label><label>本次标签<input id="label" name="label" maxlength="100" placeholder="例如：优化前基线"></label></div>
+<p id="profile-note" class="muted"></p><div id="task-list" class="task-list"></div>
+<details><summary>重复次数与资源限制</summary><div class="form-grid limits"><label>每题重复次数<input id="repeats" type="number" min="1" max="20" value="1" required></label><label>同时执行任务数<input id="concurrency" type="number" min="1" max="4" value="1" required></label><label>每次任务期限（秒）<input id="timeout_s" type="number" min="1" max="1800" value="120" required></label><label>每次任务模型调用上限<input id="max_model_calls" type="number" min="1" max="200" value="16" required></label><label>每次任务报告 token 上限<input id="max_tokens" type="number" min="1" max="2000000" value="32000" required></label></div><p class="muted">模型调用按请求准入限制；token 在响应后计量，单次在途响应可能超出剩余额度。未提供用量会标为未知并阻止后续调用。</p></details>
+<label id="local-approval" class="check" hidden><input id="allow_local_execution" type="checkbox">允许在本机运行此可信 Agent。独立目录不是安全沙箱。</label>
+<label id="paid-approval" class="check" hidden><input id="allow_paid" type="checkbox">授权本次调用配置的模型端点，可能产生费用。</label>
+<div class="actions"><button id="start" class="primary" type="submit">开始免费自检</button><span id="estimate" class="muted"></span></div>
+</form></section>
+<section id="run-section" hidden><div class="section-heading"><div><h1 id="run-title"></h1><p id="run-meta" class="muted"></p></div><div class="actions"><button id="cancel" class="danger" type="button">停止测评</button><button id="export" type="button">导出报告</button><button id="delete" class="danger" type="button">删除记录</button></div></div><p id="run-mode" class="notice"></p><progress id="progress" max="1" value="0" aria-label="任务完成进度"></progress><div id="metrics" class="metrics"></div><div id="warnings" class="muted"></div><h2>任务结果</h2><div id="trials"></div><details open><summary>运行日志 <span id="log-status" class="muted"></span></summary><pre id="logs" aria-label="运行日志"></pre></details><details><summary>可复现信息</summary><pre id="provenance"></pre></details></section>
+<section><div class="section-heading"><h2>对比两次测评</h2></div><div class="compare-bar"><label>基线<select id="left"></select></label><label>对照<select id="right"></select></label><button id="compare" type="button">查看差异</button></div><div id="comparison"></div></section>
+<footer>仅依据已经观测的证据评分；跳过、环境错误和证据不足不算通过。真实模型成绩与自检成绩分开。</footer>
+</main></div><script type="module" src="/app.mjs"></script>
+</body></html>

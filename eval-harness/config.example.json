@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "agents": [],
+  "models": [
+    {
+      "id": "configured",
+      "label": "本机配置的真实模型",
+      "protocol": "chat_completions",
+      "model": "replace-with-model-id",
+      "endpoint_env": "EVAL_MODEL_ENDPOINT",
+      "key_env": "EVAL_MODEL_KEY"
+    }
+  ]
+}

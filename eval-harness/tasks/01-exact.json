@@ -1,0 +1,1 @@
+{"version":1,"id":"exact","title":"精确文本回复","suite":"basic","requires":["text"],"turns":[{"prompt":"Reply with exactly EVAL_READY_7"}],"checks":[{"type":"exact","value":"EVAL_READY_7"}]}

@@ -1,0 +1,1 @@
+{"version":1,"id":"restart-recall","title":"独立宿主重启后继续会话","suite":"conversation","requires":["text","multiturn","restart"],"turns":[{"prompt":"Remember project code RESTART_482. Do not write it to any file."},{"prompt":"What project code did I ask you to remember? Reply with only that code.","restart_before":true}],"checks":[{"type":"contains","value":"RESTART_482","turn":1}]}

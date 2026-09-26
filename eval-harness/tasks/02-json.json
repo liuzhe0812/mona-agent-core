@@ -1,0 +1,1 @@
+{"version":1,"id":"structured","title":"结构化 JSON 回复","suite":"basic","requires":["text"],"turns":[{"prompt":"Return JSON {\"ready\":true,\"items\":[1,2,3]}"}],"checks":[{"type":"json","value":{"ready":true,"items":[1,2,3]}}]}
