@@ -53,12 +53,16 @@ pub struct TurnResponse {
     pub live: bool,
 }
 
+/// Trusted, pure host projection. Called under exact session admission, never from browser metadata.
+pub type SessionContext = Arc<dyn Fn(&sessions::Document) -> SessionResult<BTreeMap<String, String>> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct SessionApplication {
     store: Arc<Store>,
     app: AgentApplication,
     // Only admission and retained-run cleanup are serialized, never model/tool execution.
     starts: Arc<Mutex<VecDeque<String>>>,
+    context: Option<SessionContext>,
 }
 impl SessionApplication {
     pub fn new(store: Arc<Store>, app: AgentApplication) -> Self {
@@ -66,7 +70,12 @@ impl SessionApplication {
             store,
             app,
             starts: Arc::new(Mutex::new(VecDeque::new())),
+            context: None,
         }
+    }
+    pub fn with_context(mut self, context: SessionContext) -> Self {
+        self.context = Some(context);
+        self
     }
     /// Accepted admission completes even when a transport caller disconnects.
     /// A saved duplicate never starts another Run, including after process restart.
@@ -106,12 +115,16 @@ impl SessionApplication {
         let sid = id.clone();
         let req = request.clone();
         let app = self.app.clone();
-        let prepared = disk(move || store.prepare_checked(
+        let context = self.context.clone();
+        let (prepared, mut metadata) = disk(move || store.prepare_with_context(
             &sid, req.revision, &req.request_id, &req.prompt, limit,
-            |history| app.validate_session_history(history).map_err(|failure| {
-                let failure = ApplicationError::from(failure);
-                SessionError::new(SessionErrorCode::InvalidRequest, failure.message)
-            }),
+            |doc, history| {
+                app.validate_session_history(history).map_err(|failure| {
+                    let failure = ApplicationError::from(failure);
+                    SessionError::new(SessionErrorCode::InvalidRequest, failure.message)
+                })?;
+                context.as_ref().map_or_else(|| Ok(BTreeMap::new()), |project| project(doc))
+            },
         )).await?;
         if let Prepared::Existing(turn, session) = prepared {
             let live = turn
@@ -129,10 +142,8 @@ impl SessionApplication {
         let Prepared::New { history } = prepared else {
             unreachable!()
         };
-        let metadata = BTreeMap::from([
-            (SESSION_KEY.into(), id.clone()),
-            (TURN_KEY.into(), request.request_id.clone()),
-        ]);
+        metadata.insert(SESSION_KEY.into(), id.clone());
+        metadata.insert(TURN_KEY.into(), request.request_id.clone());
         let request_key = format!(
             "session-{:x}",
             Sha256::digest(format!("{}:{}", id, request.request_id).as_bytes())

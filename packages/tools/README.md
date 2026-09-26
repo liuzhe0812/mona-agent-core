@@ -2,7 +2,7 @@
 
 Reusable filesystem and command tools. `core_tools` returns the current Web product's `read`, `shell`, `edit`, and `write` bundle; it does not define the mandatory tools of every Agent. `optional_tool` supplies `grep`, `find`, or `ls` when a trusted host enables them. All tools use the public `api::Tool` contract and the Runtime's existing validation, cancellation, permission, and result limits.
 
-`ToolConfig` fixes the working directory, `ShellConfig`, output limits and host-owned `read` extensions. Relative paths resolve from that directory; absolute paths remain available for host-disclosed Skill files. This package is not a filesystem sandbox.
+`ToolConfig` fixes the working directory, `ShellConfig`, output limits and host-owned `read` extensions. Relative paths resolve from that directory; absolute paths remain available for host-disclosed Skill files. Working-directory binding alone is not a sandbox; the optional native integration below must be explicitly installed.
 
 The public shell types are `ShellTool`, `ShellConfig`, and `ShellKind`. `ShellConfig::discover()` is the normal host path; `ShellConfig::new` is available when a trusted host must choose an explicit executable and syntax.
 
@@ -39,6 +39,16 @@ host.shutdown().await?;
 ```
 
 Add optional tools with `tools::optional_tool(name, &config)` for `grep`, `find`, or `ls`; unknown names return `None`. The host also owns the Runtime dependency and task limits. The tools package itself depends on the public `api` contracts, not on Runtime internals or UI. See the [package index](../README.md) and [host capability configuration](../../docs/CAPABILITY-ASSEMBLY.zh-CN.md).
+
+## Optional local sandbox
+
+Enable the `tools/sandbox` Cargo feature and assign `ToolConfig.sandbox = Some(SandboxBinding::new(provider, resolver))`. The resolver receives trusted `RunContext`, not model arguments, and returns the immutable run mode, actual workspace root and optional Session ID. No sandbox dependency is linked without this feature; enabling the feature without a binding does not silently restrict or widen an existing host.
+
+`ShellTool` prepares exact argv through [sandbox](../sandbox/README.md), retains the native lease through process-tree completion, and counts preparation time within the existing tool/task deadline. Captured output, exit status, streaming archive and cancellation keep their original owners. A required backend failure is never retried unconfined. Bounded backend/diagnostic metadata is included in the tool result and `sandbox.execution` UI detail; stderr classification is not retry authority.
+
+`write/edit` share the same resolved policy in their existing atomic mutation path. The checked canonical target is the target actually modified, with repeat checks before creating directories and publishing the replacement; no second write/edit implementation is introduced. Read tools remain unrestricted by this file-effect policy. Host-owned output capture, checkpoints and Memory storage are not untrusted payload operations and do not inherit the file fence automatically.
+
+Windows read-only PowerShell may use ConstrainedLanguage. Its wrapper avoids FullLanguage-only initialization in that mode; the trusted native launcher configures UTF-8 console encoding. Shell syntax, tool authorization and model permissions otherwise remain unchanged. The caller shuts down the sandbox provider after its tasks, and releases persistent-session temporary state on deletion.
 
 ## Command output
 

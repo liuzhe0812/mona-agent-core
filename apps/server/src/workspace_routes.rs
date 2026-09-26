@@ -188,7 +188,7 @@ pub fn router(service: Arc<Service>, token: String, origin: Option<String>) -> R
         .allow_methods([Method::GET, Method::POST, Method::PUT])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     if let Some(origin) = origin {
-        if origin == "*" || !(origin.starts_with("http://") || origin.starts_with("https://")) {
+        if origin == "*" || !crate::ui_origin_allowed(&origin) {
             return Err(error(
                 "invalid_request",
                 "workspace requires explicit CORS origin",
@@ -212,6 +212,7 @@ pub fn router(service: Arc<Service>, token: String, origin: Option<String>) -> R
     #[cfg(feature = "projects")]
     let router = router
         .route("/api/projects", get(list_projects).post(add_project))
+        .route("/api/projects/create", post(create_project))
         .route("/api/projects/{id}/remove", post(remove_project))
         .route("/api/projects/{id}/files", get(list_project_files))
         .route("/api/projects/{id}/files/search", get(search_project_files))
@@ -236,7 +237,9 @@ async fn disk<T: Send + 'static>(
 async fn settings(
     State(s): State<StateData>,
 ) -> std::result::Result<Json<crate::workspace_setup::View>, HttpError> {
-    Ok(Json(s.service.settings.view(s.service.projects_enabled())?))
+    let mut view = s.service.settings.view(s.service.projects_enabled())?;
+    view.project_create_mode = if s.service.projects_enabled() { "name" } else { "none" };
+    Ok(Json(view))
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -254,6 +257,7 @@ async fn update_settings(
         disk(move || settings.update(value.revision, std::path::Path::new(&value.default_root)))
             .await?;
     result.projects_enabled = enabled;
+    result.project_create_mode = if enabled { "name" } else { "none" };
     Ok(Json(result))
 }
 #[derive(Serialize)]
@@ -502,6 +506,69 @@ async fn add_project(
 #[cfg(feature = "projects")]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct CreateProject {
+    request_id: String,
+    revision: u64,
+    name: String,
+}
+#[cfg(feature = "projects")]
+fn valid_project_directory(name: &str) -> bool {
+    let base = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    !name.is_empty() && name.chars().count() <= 80 && name.len() <= 240
+        && name != "." && name != ".." && !name.ends_with(['.', ' '])
+        && !name.chars().any(|c| c.is_control() || "/\\:*?\"<>|".contains(c))
+        && !matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9")
+}
+#[cfg(feature = "projects")]
+async fn create_project(
+    State(s): State<StateData>,
+    Json(v): Json<CreateProject>,
+) -> std::result::Result<Json<projects::Listing>, HttpError> {
+    let registry = s.service.projects.clone().ok_or_else(|| error("unsupported", "项目管理未装配。"))?;
+    let settings = s.service.settings.clone();
+    Ok(Json(disk(move || create_named_project(&registry, &settings, v)).await?))
+}
+#[cfg(feature = "projects")]
+fn create_named_project(registry: &projects::Registry, settings: &WorkspaceSettings, v: CreateProject) -> Result<projects::Listing> {
+    let name = v.name.trim();
+    if !valid_project_directory(name) {
+        return Err(error("invalid_request", "项目名称需为有效的单层目录名，最多 80 个字符。"));
+    }
+    if v.request_id.is_empty() || v.request_id.len() > 64 || !v.request_id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_') {
+        return Err(error("invalid_request", "项目请求 ID 无效。"));
+    }
+    if registry.list()?.revision != v.revision {
+        return Err(error("conflict", "项目列表已更新，请刷新。"));
+    }
+    let base = settings.allowed_root(std::path::Path::new(&settings.view(false)?.default_root))?;
+    let path = base.join(name);
+    std::fs::create_dir(&path).map_err(|cause| if cause.kind() == std::io::ErrorKind::AlreadyExists {
+        error("conflict", "默认工作区已有同名目录，请换一个项目名称。")
+    } else { error("io", "无法在默认工作区创建项目目录。") })?;
+    let result = (|| {
+        let root = settings.allowed_root(&path)?;
+        if !workspace::contains_path(&base, &root) || base == root {
+            return Err(error("forbidden", "项目目录必须位于默认工作区内。"));
+        }
+        registry.add(&v.request_id, v.revision, name, &root)
+    })();
+    match result {
+        Ok(listing) => Ok(listing),
+        Err(failure) => {
+            if ["conflict", "capacity", "invalid_request", "forbidden"].contains(&failure.code.as_str()) {
+                let _ = std::fs::remove_dir(&path);
+            }
+            if failure.code == "io" {
+                Err(error("io", "项目目录已创建，但登记未确认；请刷新项目列表并检查目录。"))
+            } else {
+                Err(failure)
+            }
+        }
+    }
+}
+#[cfg(feature = "projects")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Revision {
     revision: u64,
 }
@@ -517,4 +584,34 @@ async fn remove_project(
         .clone()
         .ok_or_else(|| error("unsupported", "项目管理未装配。"))?;
     Ok(Json(disk(move || registry.remove(&id, v.revision)).await?))
+}
+
+#[cfg(all(test, feature = "projects"))]
+mod project_create_tests {
+    use super::*;
+
+    #[test]
+    fn name_creation_stays_under_default_root_and_rejects_unsafe_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("work");
+        let settings = WorkspaceSettings::open(temp.path().join("settings.json"), root.clone(), None, vec![]).unwrap();
+        let registry = projects::Registry::open(&temp.path().join("projects.json")).unwrap();
+        let listing = create_named_project(&registry, &settings, CreateProject {
+            request_id: "first".into(), revision: 0, name: "项目一".into(),
+        }).unwrap();
+        assert!(root.join("项目一").is_dir());
+        assert_eq!(listing.projects[0].name, "项目一");
+        for name in ["..", "../outside", "nested/child", "C:\\outside", "CON", "bad."] {
+            let failure = create_named_project(&registry, &settings, CreateProject {
+                request_id: format!("bad-{}", name.len()), revision: listing.revision, name: name.into(),
+            }).err().unwrap();
+            assert_eq!(failure.code, "invalid_request");
+        }
+        assert!(!temp.path().join("outside").exists());
+        let duplicate = create_named_project(&registry, &settings, CreateProject {
+            request_id: "second".into(), revision: listing.revision, name: "项目一".into(),
+        }).err().unwrap();
+        assert_eq!(duplicate.code, "conflict");
+        assert_eq!(registry.list().unwrap().projects.len(), 1);
+    }
 }

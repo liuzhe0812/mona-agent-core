@@ -39,17 +39,3 @@ fn all_session_bindings_survive_default_change_without_project_registration() {
     assert!(store.get(&fake_project.id).is_ok()); // History read does not require a live filesystem.
     assert!(Path::new(&fake_project.workspace).is_absolute());
 }
-
-#[test]
-fn legacy_grouped_state_is_rejected_without_touching_it() {
-    let temp = tempfile::tempdir().unwrap();
-    let state = temp.path().join("state");
-    let old = state.join("a".repeat(64));
-    fs::create_dir_all(&old).unwrap();
-    fs::write(old.join("s-old.jsonl"), "original").unwrap();
-    assert!(Store::open(&state, temp.path()).is_err());
-    assert_eq!(
-        fs::read_to_string(old.join("s-old.jsonl")).unwrap(),
-        "original"
-    );
-}

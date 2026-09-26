@@ -246,7 +246,22 @@ fn artifact_bytes_are_part_of_result_budget() {
 
 #[test]
 fn rust_api_version_and_ui_protocol_are_independent() {
-    assert_eq!(API_VERSION, 9);
+    assert_eq!(API_VERSION, 10);
     assert_eq!(STREAM_VERSION, 2);
-    assert_eq!(CHECKPOINT_VERSION, 1);
+    assert_eq!(CHECKPOINT_VERSION, 2);
+}
+
+#[test]
+fn cache_details_never_change_the_existing_reported_token_limit() {
+    let task = TaskControl::new(TaskLimits { max_reported_tokens: Some(100), ..TaskLimits::default() });
+    task.record_usage(Some(Usage { input_tokens: 80, output_tokens: 5,
+        cache_read_tokens: Some(60), cache_write_tokens: Some(0) }));
+    assert_eq!(task.usage().reported_tokens, 85);
+    assert_eq!(task.statistics().cache_read_tokens, Some(60));
+    task.check().unwrap();
+    task.record_usage(Some(Usage { input_tokens: 20, output_tokens: 0,
+        cache_read_tokens: None, cache_write_tokens: None }));
+    assert_eq!(task.usage().reported_tokens, 105);
+    assert_eq!(task.statistics().cache_read_tokens, None);
+    assert!(task.check().is_err());
 }

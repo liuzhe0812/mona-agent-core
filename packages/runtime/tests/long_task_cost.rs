@@ -35,11 +35,11 @@ impl Model for CostModel {
                 ModelEvent::ToolDelta { index: 0, id: Some(format!("call-{round}")), name: Some("work".into()),
                     arguments: json!({"round":round}).to_string() },
                 ModelEvent::Finish(FinishReason::ToolCalls),
-                ModelEvent::Usage(Usage { input_tokens: 100, output_tokens: 1 }), ModelEvent::End,
+                ModelEvent::Usage(Usage { input_tokens: 100, output_tokens: 1, cache_read_tokens: None, cache_write_tokens: None }), ModelEvent::End,
             ]
         } else {
             vec![ModelEvent::Text("finished".into()), ModelEvent::Finish(FinishReason::Stop),
-                ModelEvent::Usage(Usage { input_tokens: 100, output_tokens: 1 }), ModelEvent::End]
+                ModelEvent::Usage(Usage { input_tokens: 100, output_tokens: 1, cache_read_tokens: None, cache_write_tokens: None }), ModelEvent::End]
         };
         Ok(Box::pin(futures_util::stream::iter(events.into_iter().map(Ok))))
     }

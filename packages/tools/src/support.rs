@@ -32,9 +32,12 @@ pub(crate) struct Mutation {
 pub(crate) async fn mutate_file(
     path: PathBuf,
     ctx: &ToolContext,
+    _config: &crate::ToolConfig,
     transform: impl FnOnce(Option<Vec<u8>>) -> Result<Vec<u8>> + Send + 'static,
 ) -> Result<Mutation> {
     let run = ctx.run.clone();
+    #[cfg(feature = "sandbox")]
+    let policy = _config.sandbox.as_ref().map(|binding| binding.resolve(&run)).transpose()?;
     tokio::task::spawn_blocking(move || {
         let check = || {
             run.task.check()?;
@@ -44,12 +47,25 @@ pub(crate) async fn mutate_file(
             Ok(())
         };
         check()?;
+        #[cfg(feature = "sandbox")]
+        let path = if let Some(policy) = &policy { policy.check_write(&path).map_err(crate::confinement::failure)? } else { canonical_destination(&path)? };
+        #[cfg(not(feature = "sandbox"))]
         let path = canonical_destination(&path)?;
+        let recheck = || -> Result<()> {
+            check()?;
+            #[cfg(feature = "sandbox")]
+            if let Some(policy) = &policy {
+                if policy.check_write(&path).map_err(crate::confinement::failure)? != path {
+                    return Err(error(ErrorCode::Policy, "FS_SANDBOX_DENIED: destination changed before file mutation"));
+                }
+            }
+            Ok(())
+        };
         let lock = mutation_lock(&path);
         let _guard = lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        check()?;
+        recheck()?;
         const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
         let (before, permissions) = match std::fs::File::open(&path) {
             Ok(file) => {
@@ -89,11 +105,12 @@ pub(crate) async fn mutate_file(
                 "file mutation exceeds 32 MiB limit",
             ));
         }
-        check()?;
+        recheck()?;
         let parent = path
             .parent()
             .ok_or_else(|| error(ErrorCode::Tool, "destination has no parent directory"))?;
         std::fs::create_dir_all(parent).map_err(io_error)?;
+        recheck()?;
         let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(io_error)?;
         temporary.write_all(&after).map_err(io_error)?;
         if let Some(permissions) = permissions {
@@ -103,7 +120,7 @@ pub(crate) async fn mutate_file(
                 .map_err(io_error)?;
         }
         temporary.as_file().sync_all().map_err(io_error)?;
-        check()?;
+        recheck()?;
         temporary.persist(&path).map_err(|e| io_error(e.error))?;
         Ok(Mutation { before, after })
     })

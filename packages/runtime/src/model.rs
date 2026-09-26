@@ -25,6 +25,7 @@ impl Gateway {
         let prepared = crate::meter::InputMeter::prepare(&request);
         let reply = self.complete(request, sink).await?;
         lock(&self.input_meter).record(prepared, reply.usage);
+        if let Some(usage) = reply.usage { self.task.anchor_context(usage.input_tokens); }
         Ok(reply)
     }
     fn audit_reservation(&self, bytes: usize) -> usize {
@@ -143,10 +144,18 @@ impl ModelCaller for Gateway {
             let mut collected = Collected::default();
             let deadline = self.task.deadline().min(Instant::now() + self.limits.model_timeout);
             let attempt_request = request.clone();
+            let started = Instant::now();
+            let mut first_token = None;
             let result = bounded(&self.cancel, &operation, deadline, self.limits.cancellation_grace, async {
                 let mut stream = self.raw.stream(attempt_request, operation.clone()).await?;
                 while let Some(event) = stream.next().await {
-                    collected.push(event?, &self.limits, sink.as_deref())?;
+                    let event = event?;
+                    if first_token.is_none() && match &event {
+                        ModelEvent::Text(text) | ModelEvent::Reasoning(text) => !text.is_empty(),
+                        ModelEvent::ToolDelta { id, name, arguments, .. } => id.is_some() || name.is_some() || !arguments.is_empty(),
+                        _ => false,
+                    } { first_token = Some(Instant::now()); }
+                    collected.push(event, &self.limits, sink.as_deref())?;
                 }
                 let reply = collected.reply()?;
                 if reply.tool_calls.iter().any(|call| !offered.contains(&call.name)) {
@@ -154,7 +163,10 @@ impl ModelCaller for Gateway {
                 }
                 Ok(reply)
             }).await;
-            self.task.record_usage(collected.usage);
+            let elapsed = started.elapsed();
+            self.task.record_model_attempt(collected.usage, elapsed,
+                result.is_ok().then(|| first_token.map(|time| time.duration_since(started))).flatten(),
+                result.is_ok().then(|| collected.usage.map(|usage| usage.output_tokens)).flatten());
             if result.is_err() { self.task.mark_usage_incomplete(); }
             let result = result.and_then(|reply| { self.task.check()?; Ok(reply) })
                 .map_err(|mut error| {

@@ -6,7 +6,7 @@ members = [
   "packages/memory", "packages/planner", "packages/compaction", "packages/spill", "packages/tools", "examples/demo",
   "packages/application", "packages/http-bridge", "packages/tauri-bridge", "apps/server",
   "examples/tauri-composition", "packages/models", "packages/skills",
-  "packages/workspace", "packages/projects"
+  "packages/workspace", "packages/projects", "packages/sandbox", "packages/subagent"
 ]
 
 # Default build excludes both transport bridges and composition examples.
@@ -35,6 +35,8 @@ spill = { path = "packages/spill" }
 tools = { path = "packages/tools" }
 sessions = { path = "packages/sessions" }
 instructions = { path = "packages/instructions" }
+sandbox = { path = "packages/sandbox" }
+subagent = { path = "packages/subagent" }
 base64 = "0.22"
 async-trait = "0.1.86"
 serde = { version = "1.0.217", features = ["derive", "rc"] }
@@ -44,4 +46,4 @@ tokio-util = { version = "0.7.13", features = ["rt"] }
 futures-util = "0.3.31"
 reqwest = { version = "0.12.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 bytes = "1.9.0"
-jsonschema = { version = "0.18.3", default-features = false }
+jsonschema = { version = "0.18.3", default-features = false, features = ["draft201909", "draft202012"] }

@@ -12,7 +12,7 @@ impl RunSession for Session {
         if !self.complete { return std::future::pending().await; }
         Ok(Arc::new(RunReport { run_id:self.run_id().into(), status:RunStatus::Completed,
             output:Some("done".into()), error:None, transcript:vec![], model_requests:vec![],
-            task_usage:TaskControl::default().usage(), steps:1, checkpoint:Default::default() }))
+            task_usage:TaskControl::default().usage(), steps:1, statistics:RunStatistics::default(), checkpoint:Default::default() }))
     }
 }
 #[tokio::test]

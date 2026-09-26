@@ -264,14 +264,16 @@ async fn auxiliary_model_calls_inherit_options_and_share_budget() {
 }
 
 #[tokio::test]
-async fn planner_forwards_host_selected_model_options_and_tool_ceiling() {
-    let model = ScriptModel::new(vec![answer(r#"{"steps":["do work"]}"#), answer("done")]);
-    let mut host = HostBuilder::new().model(model.clone()).tool(Arc::new(CountTool::default())).build().await.unwrap();
-    let mut request = planner::PlanRequest::new("work");
+async fn planner_preserves_host_selected_model_options_and_tool_ceiling() {
+    let model = ScriptModel::new(vec![answer("done")]);
+    let mut host = HostBuilder::new().model(model.clone()).tool(Arc::new(CountTool::default()))
+        .plugin(Arc::new(planner::PlannerPlugin::default())).build().await.unwrap();
+    let mut request = RunRequest::new("work");
     request.allowed_tools = Some(BTreeSet::new());
     request.model_options.temperature = Some(0.1);
-    let report = planner::Planner::default().plan_and_execute(&host.engine(), request).await.unwrap();
+    let report = host.engine().execute(request).await.unwrap();
     assert_eq!(report.status, RunStatus::Completed);
+    assert_eq!(report.task_usage.model_calls, 1);
     assert!(model.requests.lock().unwrap().iter().all(|r| r.tools.is_empty() && r.options.temperature == Some(0.1)));
     host.shutdown().await.unwrap();
 }

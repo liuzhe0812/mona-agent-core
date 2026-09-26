@@ -14,6 +14,8 @@ pub(crate) struct Capture {
     preview_limit: usize,
     archive: Option<Arc<dyn OutputArchive>>,
     decoders: [Decoder; 2],
+    #[cfg(feature = "sandbox")]
+    sandbox: Option<(serde_json::Value, &'static str)>,
 }
 impl Capture {
     pub fn new(config: &ToolConfig, ctx: &ToolContext) -> api::Result<Self> {
@@ -27,7 +29,17 @@ impl Capture {
         let trigger = archive.as_ref().map_or(inline, |a| a.trigger_bytes().min(inline));
         let preview_limit = archive.as_ref().map_or(inline, |a| a.preview_bytes().min(inline));
         Ok(Self { preview: VecDeque::new(), spool: None, bytes: 0, raw_bytes: 0,
-            trigger, preview_limit, archive, decoders: Default::default() })
+            trigger, preview_limit, archive, decoders: Default::default(),
+            #[cfg(feature = "sandbox")] sandbox: None })
+    }
+    #[cfg(feature = "sandbox")]
+    pub fn set_sandbox(&mut self, value: serde_json::Value, diagnostic: Option<sandbox::Diagnostic>) {
+        let notice = match diagnostic {
+            Some(sandbox::Diagnostic::Denied) => "[sandbox: denied] An operation was blocked. Earlier operations may have completed; inspect before retrying.\n",
+            Some(sandbox::Diagnostic::RunnerFailure) => "[sandbox: unavailable] Launcher failure evidence was reported; no unconfined retry was attempted.\n",
+            _ => "",
+        };
+        self.sandbox = Some((value, notice));
     }
     pub async fn append(&mut self, stream: usize, input: &[u8], eof: bool) -> api::Result<()> {
         self.raw_bytes = self.raw_bytes.saturating_add(input.len());
@@ -72,6 +84,11 @@ impl Capture {
             "output_bytes":self.bytes,"raw_output_bytes":self.raw_bytes,
             "utf8_replacements":self.decoders.iter().any(|d| d.replaced),
             "full_output_path":artifact.as_ref().map(|a| a.uri.as_str())}));
+        let notice = "";
+        #[cfg(feature = "sandbox")]
+        let notice = if let Some((value, notice)) = self.sandbox.take() {
+            output.structured.as_mut().expect("shell metadata")["sandbox"] = value; notice
+        } else { notice };
         output.artifact = artifact;
         let mut overhead = ToolResult::from_output(&ctx.call_id, output.clone()).payload_bytes();
         if !truncated && self.preview.len() > ctx.run.limits.max_tool_result_bytes.saturating_sub(overhead) {
@@ -82,13 +99,13 @@ impl Capture {
         let marker = if !truncated { "" } else if output.artifact.is_some() {
             "[Output shortened; use read with the artifact URI. Offset and limit are bytes, starting at 1.]\n"
         } else { "[Output shortened; omitted bytes were not retained because no usable output archive is installed.]\n" };
-        let available = ctx.run.limits.max_tool_result_bytes.saturating_sub(overhead);
+        let available = ctx.run.limits.max_tool_result_bytes.saturating_sub(overhead).saturating_sub(notice.len());
         if available < marker.len() { return Err(error(ErrorCode::Limit, "command completed; result budget cannot fit its exit status and archive metadata")); }
         let bytes: Vec<u8> = self.preview.into_iter().collect();
         let mut start = bytes.len().saturating_sub(available - marker.len());
         while start < bytes.len() && bytes[start] & 0xc0 == 0x80 { start += 1; }
         let tail = String::from_utf8_lossy(&bytes[start..]);
-        output.content = if self.bytes == 0 { "(no output)".into() } else { format!("{marker}{tail}").into() };
+        output.content = if self.bytes == 0 { format!("{notice}(no output)").into() } else { format!("{notice}{marker}{tail}").into() };
         if ToolResult::from_output(&ctx.call_id, output.clone()).payload_bytes() > ctx.run.limits.max_tool_result_bytes {
             return Err(error(ErrorCode::Limit, "command result exceeds its output budget"));
         }

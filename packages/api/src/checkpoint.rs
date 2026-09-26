@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
 
-pub const CHECKPOINT_VERSION: u32 = 1;
+pub const CHECKPOINT_VERSION: u32 = 2;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum CheckpointPhase {
@@ -44,6 +44,7 @@ pub struct RunCheckpoint {
     pub model_options: ModelOptions,
     pub metadata: BTreeMap<String, String>,
     pub task_usage: TaskUsage,
+    pub statistics: crate::RunStatistics,
     pub status: Option<RunStatus>,
     pub error: Option<AgentError>,
 }

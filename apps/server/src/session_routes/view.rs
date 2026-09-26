@@ -123,6 +123,17 @@ pub fn turn_page(
                         } = &mut item.content
                         {
                             *value = Some(UiToolResult::from_result(result));
+                            #[cfg(feature = "planner")]
+                            if matches!(call.name.as_str(), planner::PLAN_READ | planner::PLAN_UPDATE | planner::PLAN_SUBMIT)
+                                && result.status == ToolStatus::Success && !result.truncated {
+                                if let Some(raw) = result.structured.as_ref().and_then(|v| v.get("planner")) {
+                                    if raw.get("call_id").and_then(Value::as_str) == Some(call.id.as_str()) {
+                                        if let Some(state) = raw.get("state").and_then(|v| serde_json::from_value::<planner::PlanSnapshot>(v.clone()).ok()) {
+                                            if state.validate().is_ok() { details.insert("planner.plan".into(), serde_json::to_value(state).map_err(|_| error(Code::Internal, "计划展示编码失败。"))?); }
+                                        }
+                                    }
+                                }
+                            }
                             if call.name == "edit" {
                                 if let Some(detail) =
                                     result.structured.as_ref().and_then(coding_diff_detail)

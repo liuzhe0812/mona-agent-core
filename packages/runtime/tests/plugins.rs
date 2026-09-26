@@ -2,7 +2,7 @@ mod support;
 use api::*;
 use runtime::HostBuilder;
 use memory::{InMemoryStore, Backend, Binding, Change, Operation, Origin, MemoryPlugin};
-use planner::{PlanRequest, Planner, PlannerPlugin, PLANNER_SERVICE};
+use planner::{PlannerPlugin, recover_history};
 use std::{sync::{Arc, Mutex}, time::Duration};
 use support::*;
 
@@ -140,26 +140,25 @@ async fn memory_write_tool_is_denied_by_default() {
 }
 
 #[tokio::test]
-async fn planner_uses_same_executor_and_shared_task_budget() {
-    let model = ScriptModel::new(vec![answer(r#"{"steps":["one","two"]}"#), answer("one done"), answer("two done")]);
+async fn planner_updates_use_the_same_run_and_task_budget() {
+    let update = serde_json::json!({"revision":0,"goal":"goal","steps":[{"id":"one","text":"first","status":"in_progress"}]});
+    let model = ScriptModel::new(vec![calls(&[("plan-1", "plan_update", update)]), answer("done")]);
     let mut host = HostBuilder::new().model(model.clone()).plugin(Arc::new(PlannerPlugin::default())).build().await.unwrap();
-    let planner = host.services().unwrap().get::<Planner>(PLANNER_SERVICE).unwrap();
-    let mut request = PlanRequest::new("goal");
-    request.task = TaskControl::new(TaskLimits { max_model_calls: 2, ..Default::default() });
-    let report = planner.plan_and_execute(&host.engine(), request).await.unwrap();
+    let mut request = RunRequest::new("goal");
+    request.task = TaskControl::new(TaskLimits { max_model_calls: 1, ..Default::default() });
+    let report = host.engine().execute(request).await.unwrap();
     assert_eq!(report.status, RunStatus::Limited);
-    assert_eq!(model.requests.lock().unwrap().len(), 2);
-    assert!(report.planning_run.model_requests[0].request.as_ref().unwrap().tools.is_empty());
+    assert_eq!(report.task_usage.model_calls, 1);
+    assert_eq!(recover_history(&report.transcript).unwrap().unwrap().revision, 1);
+    assert_eq!(model.requests.lock().unwrap().len(), 1);
     host.shutdown().await.unwrap();
 }
 #[tokio::test]
-async fn malformed_plan_is_not_executed() {
-    let model = ScriptModel::new(vec![answer(r#"{"steps":[]}"#)]);
+async fn malformed_plan_arguments_do_not_replace_the_plan() {
+    let model = ScriptModel::new(vec![calls(&[("bad-plan", "plan_update", serde_json::json!({"revision":0,"goal":"goal","steps":[]}))]), answer("fix the input")]);
     let mut host = HostBuilder::new().model(model.clone()).plugin(Arc::new(PlannerPlugin::default())).build().await.unwrap();
-    let planner = host.services().unwrap().get::<Planner>(PLANNER_SERVICE).unwrap();
-    let report = planner.plan_and_execute(&host.engine(), PlanRequest::new("goal")).await.unwrap();
-    assert_eq!(report.status, RunStatus::Failed);
-    assert!(report.step_runs.is_empty());
-    assert_eq!(model.requests.lock().unwrap().len(), 1);
+    let report = host.engine().execute(RunRequest::new("goal")).await.unwrap();
+    assert_eq!(results(&report)[0].status, ToolStatus::Error);
+    assert!(recover_history(&report.transcript).unwrap().is_none());
     host.shutdown().await.unwrap();
 }

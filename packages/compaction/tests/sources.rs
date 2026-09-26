@@ -53,6 +53,8 @@ impl Model for CapturingModel {
             ModelEvent::Usage(Usage {
                 input_tokens: if summary { 1_000_000 } else { 40 },
                 output_tokens: 5,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             }),
             ModelEvent::Finish(FinishReason::Stop),
             ModelEvent::End,

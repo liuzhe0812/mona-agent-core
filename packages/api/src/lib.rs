@@ -29,4 +29,4 @@ pub use streaming::*;
 pub use tokio_util::sync::CancellationToken;
 pub use tool::*;
 pub use validation::validate_messages;
-pub const API_VERSION: u32 = 9;
+pub const API_VERSION: u32 = 10;

@@ -6,7 +6,8 @@ license.workspace = true
 publish = false
 
 [features]
-default = ["model-management", "skills", "compaction", "spill", "projects", "memory", "history-search"]
+subagent = ["dep:subagent"]
+default = ["model-management", "skills", "compaction", "spill", "projects", "memory", "history-search", "planner", "sandbox", "subagent"]
 model-management = ["dep:models"]
 skills = ["dep:skills"]
 compaction = ["dep:compaction", "sessions/compaction"]
@@ -14,8 +15,13 @@ spill = ["dep:spill"]
 projects = ["dep:projects"]
 memory = ["dep:memory"]
 history-search = ["sessions/search"]
+planner = ["dep:planner"]
+sandbox = ["dep:sandbox", "tools/sandbox"]
 
 [dependencies]
+subagent = { workspace = true, optional = true }
+sandbox = { workspace = true, optional = true }
+planner = { workspace = true, optional = true }
 api.workspace = true
 runtime.workspace = true
 application = { workspace = true, features = ["sessions"] }

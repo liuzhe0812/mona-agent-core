@@ -15,6 +15,7 @@ pub(crate) struct Checkpoints {
 impl Checkpoints {
     pub fn new(sink: Option<Arc<dyn CheckpointSink>>, ctx: &RunContext, limits: RunLimits) -> Self {
         let configured = sink.is_some();
+        let (task_usage, statistics) = ctx.task.accounting();
         Self {
             sink, task: ctx.task.clone(), limits,
             state: Arc::new(Mutex::new(State {
@@ -23,7 +24,7 @@ impl Checkpoints {
                     phase: CheckpointPhase::BeforeModel, step: 0, transcript: vec![],
                     pending_tools: BTreeMap::new(), selected_tools: vec![],
                     model_options: ctx.model_options.clone(), metadata: (*ctx.metadata).clone(),
-                    task_usage: ctx.task.usage(), status: None, error: None,
+                    task_usage, statistics, status: None, error: None,
                 },
                 status: CheckpointStatus { configured, ..CheckpointStatus::default() },
             })),
@@ -42,7 +43,7 @@ impl Checkpoints {
         update(&mut state.current);
         state.current.revision += 1;
         state.current.phase = phase;
-        state.current.task_usage = self.task.usage();
+        (state.current.task_usage, state.current.statistics) = self.task.accounting();
         if serde_json::to_vec(&state.current).map_or(true, |v| v.len() > self.limits.max_checkpoint_bytes) {
             let error = AgentError::new(ErrorCode::Checkpoint, "checkpoint exceeds configured byte limit");
             state.status.error = Some(error.clone());

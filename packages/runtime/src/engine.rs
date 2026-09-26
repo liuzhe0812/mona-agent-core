@@ -320,6 +320,7 @@ impl Engine {
                 }
             }
             let checkpoint = execution.checkpoints.status().await;
+            let (task_usage, statistics) = execution.context.task.accounting();
             let report = Arc::new(RunReport {
                 run_id: execution.context.run_id.clone(),
                 status,
@@ -327,7 +328,8 @@ impl Engine {
                 error,
                 transcript: execution.transcript.take(),
                 model_requests: execution.gateway.audits(),
-                task_usage: execution.context.task.usage(),
+                task_usage,
+                statistics,
                 steps: execution.steps,
                 checkpoint,
             });

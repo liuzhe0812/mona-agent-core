@@ -89,7 +89,7 @@ impl Tool for EditTool {
         let path_text = path.display().to_string();
         let path_text_for_closure = path_text.clone();
         let edit_count = args.edits.len();
-        let mutation = mutate_file(path.clone(), &ctx, move |before| {
+        let mutation = mutate_file(path.clone(), &ctx, &self.config, move |before| {
             let Some(bytes) = before else {
                 return Err(error(
                     ErrorCode::Tool,

@@ -143,6 +143,8 @@ fn answer(text: &str) -> Vec<ModelEvent> {
         ModelEvent::Usage(Usage {
             input_tokens: 1,
             output_tokens: 1,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
         }),
         ModelEvent::End,
     ]
@@ -160,6 +162,8 @@ fn tool_call(id: &str, name: &str, arguments: Value) -> Vec<ModelEvent> {
         ModelEvent::Usage(Usage {
             input_tokens: 1,
             output_tokens: 1,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
         }),
         ModelEvent::End,
     ]

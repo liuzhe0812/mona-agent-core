@@ -190,30 +190,27 @@ impl Tool for ShellTool {
             .min(ctx.run.limits.tool_timeout);
         let deadline = (Instant::now() + timeout).min(ctx.run.task.deadline());
         let task_cancel = ctx.run.task.cancellation();
-        let mut command = CommandWrap::with_new(&self.config.shell.executable, |command| {
-            match self.config.shell.kind {
-                ShellKind::PowerShell => {
-                    let script = format!("$ProgressPreference = 'SilentlyContinue'; [Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false); $ErrorActionPreference = 'Stop'; & {{ {} }}; $monaCommandSucceeded = $?; if ($null -ne $LASTEXITCODE) {{ exit $LASTEXITCODE }}; if (-not $monaCommandSucceeded) {{ exit 1 }}", args.command);
-                    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-                    use base64::Engine;
-                    command
-                        .args([
-                            "-NoLogo",
-                            "-NoProfile",
-                            "-NonInteractive",
-                            "-ExecutionPolicy",
-                            "Bypass",
-                            "-OutputFormat",
-                            "Text",
-                            "-EncodedCommand",
-                        ])
-                        .arg(base64::engine::general_purpose::STANDARD.encode(bytes));
-                }
-                ShellKind::Bash | ShellKind::Sh => {
-                    command.args(["-c", &args.command]);
-                }
-            }
-            command
+        let argv = shell_argv(&self.config.shell, &args.command);
+        #[cfg(feature = "sandbox")]
+        let confinement = if let Some(binding) = &self.config.sandbox {
+            let policy = binding.resolve(&ctx.run)?;
+            let stop = ctx.run.cancel.child_token(); let _stop_on_drop = stop.clone().drop_guard();
+            let plan = tokio::select! {
+                biased;
+                _ = ctx.run.cancel.cancelled() => return Err(error(ErrorCode::Cancelled, "sandbox preparation cancelled")),
+                _ = task_cancel.cancelled() => return Err(error(ErrorCode::Cancelled, "sandbox preparation cancelled")),
+                _ = time::sleep_until(deadline) => return Err(error(ErrorCode::Deadline, "sandbox preparation exceeded tool deadline")),
+                plan = binding.provider.prepare(&argv, &policy, &stop) => plan.map_err(crate::confinement::failure)?,
+            };
+            Some((policy.mode, plan))
+        } else { None };
+        let (program, command_args) = (&argv[0], &argv[1..]);
+        #[cfg(feature = "sandbox")]
+        let (program, command_args) = confinement.as_ref().map_or((program, command_args), |(_, plan)| (&plan.program, plan.args.as_slice()));
+        #[cfg(feature = "sandbox")]
+        let mut diagnostics = confinement.as_ref().and_then(|(_, plan)| plan.info).map(|info| sandbox::Diagnostics::new(info.backend));
+        let mut command = CommandWrap::with_new(program, |command| {
+            command.args(command_args)
                 .current_dir(&self.config.cwd)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
@@ -231,10 +228,18 @@ impl Tool for ShellTool {
         if ctx.run.cancel.is_cancelled() {
             return Err(error(ErrorCode::Cancelled, "shell command cancelled"));
         }
+        ctx.run.task.check()?;
+        if Instant::now() >= deadline { return Err(error(ErrorCode::Deadline, "shell launch deadline reached")); }
         let mut tree = ProcessTree {
             child: command
                 .spawn()
-                .map_err(|e| error(ErrorCode::Tool, format!("cannot start shell: {e}")))?,
+                .map_err(|e| {
+                    #[cfg(feature = "sandbox")]
+                    if confinement.as_ref().is_some_and(|(_, p)| p.info.is_some()) {
+                        return error(ErrorCode::Tool, format!("SANDBOX_UNAVAILABLE: cannot start confined shell: {e}; not retried unconfined"));
+                    }
+                    error(ErrorCode::Tool, format!("cannot start shell: {e}"))
+                })?,
             armed: true,
         };
         let mut stdout = tree
@@ -272,6 +277,8 @@ impl Tool for ShellTool {
                 },
             };
             let incoming = if stream == 0 { &stdout_buffer[..count] } else { &stderr_buffer[..count] };
+            #[cfg(feature = "sandbox")]
+            if stream == 1 { if let Some(diagnostics) = &mut diagnostics { diagnostics.push(incoming); } }
             let appended = tokio::select! {
                 biased;
                 _ = ctx.run.cancel.cancelled() => Err(error(ErrorCode::Cancelled, "command capture cancelled")),
@@ -296,6 +303,13 @@ impl Tool for ShellTool {
         }
         let status =
             status.ok_or_else(|| error(ErrorCode::Tool, "command exit status unavailable"))?;
+        #[cfg(feature = "sandbox")]
+        if let Some((mode, plan)) = &confinement {
+            let diagnostic = diagnostics.map(|d| d.classify(status.code(), status.success())).flatten();
+            let detail = json!({"mode":mode,"backend":plan.info.map(|i| i.backend),"enforcement":plan.info.map(|i| i.enforcement),"diagnostic":diagnostic});
+            let _ = ctx.progress.set_detail("sandbox.execution", detail.clone());
+            capture.set_sandbox(detail, diagnostic);
+        }
         tokio::select! {
             biased;
             _ = ctx.run.cancel.cancelled() => Err(error(ErrorCode::Cancelled, "command archive cancelled")),
@@ -304,6 +318,21 @@ impl Tool for ShellTool {
             result = capture.finish(&ctx, status.code(), status.success()) => result,
         }
     }
+}
+
+fn shell_argv(shell: &ShellConfig, command: &str) -> Vec<std::ffi::OsString> {
+    let mut argv = vec![shell.executable.clone().into_os_string()];
+    match shell.kind {
+        ShellKind::PowerShell => {
+            let script = format!("$ProgressPreference = 'SilentlyContinue'; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') {{ [Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false) }}; $ErrorActionPreference = 'Stop'; & {{ {command} }}; $monaCommandSucceeded = $?; if ($null -ne $LASTEXITCODE) {{ exit $LASTEXITCODE }}; if (-not $monaCommandSucceeded) {{ exit 1 }}");
+            use base64::Engine;
+            let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            argv.extend(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-OutputFormat", "Text", "-EncodedCommand"].map(Into::into));
+            argv.push(base64::engine::general_purpose::STANDARD.encode(bytes).into());
+        },
+        ShellKind::Bash | ShellKind::Sh => argv.extend(["-c".into(), command.into()]),
+    }
+    argv
 }
 
 fn resolve_timeout(value: Option<f64>) -> api::Result<Option<Duration>> {

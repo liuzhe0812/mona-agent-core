@@ -26,7 +26,14 @@ impl CompiledTool {
             return Err(AgentError::new(ErrorCode::Schema, "tool description/schema too large"));
         }
         reject_external_refs(&spec.parameters)?;
-        let validator = JSONSchema::options().with_draft(Draft::Draft7).compile(&spec.parameters)
+        let draft = match spec.parameters.get("$schema").and_then(|v|v.as_str()).map(|s|s.trim_end_matches('#')) {
+            None if spec.parameters.get("$schema").is_none() => Draft::Draft7,
+            Some("http://json-schema.org/draft-07/schema"|"https://json-schema.org/draft-07/schema") => Draft::Draft7,
+            Some("https://json-schema.org/draft/2019-09/schema") => Draft::Draft201909,
+            Some("https://json-schema.org/draft/2020-12/schema") => Draft::Draft202012,
+            _ => return Err(AgentError::new(ErrorCode::Schema,"unsupported tool JSON Schema dialect")),
+        };
+        let validator = JSONSchema::options().with_draft(draft).compile(&spec.parameters)
             .map_err(|e| AgentError::new(ErrorCode::Schema, format!("invalid tool schema: {e}")))?;
         Ok(Self { spec, implementation, validator })
     }
@@ -34,8 +41,8 @@ impl CompiledTool {
 fn reject_external_refs(value: &serde_json::Value) -> Result<()> {
     match value {
         serde_json::Value::Object(map) => {
-            if let Some(reference) = map.get("$ref") {
-                if !reference.as_str().is_some_and(|s| s.starts_with('#')) {
+            for key in ["$ref","$dynamicRef","$recursiveRef"] {
+                if map.get(key).is_some_and(|r|!r.as_str().is_some_and(|s|s.starts_with('#'))) {
                     return Err(AgentError::new(ErrorCode::Schema, "only local JSON Schema references are allowed"));
                 }
             }
@@ -45,6 +52,32 @@ fn reject_external_refs(value: &serde_json::Value) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod schema_dialect_tests {
+    use super::*;
+    use serde_json::{json,Value};
+    struct Declared(Value);
+    #[async_trait]
+    impl Tool for Declared {
+        fn spec(&self)->ToolSpec { ToolSpec {name:"declared_schema".into(),description:"schema test".into(),parameters:self.0.clone(),concurrency:ToolConcurrency::Exclusive,side_effects:false} }
+        async fn execute(&self,_ctx:ToolContext,_args:Value)->Result<ToolOutput>{Ok(ToolOutput::new("unused"))}
+    }
+    #[test]
+    fn declared_2020_tuple_is_not_misinterpreted_as_draft7() {
+        let schema=json!({"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"tuple":{"type":"array","prefixItems":[{"type":"string"}],"items":false}},"required":["tuple"]});
+        let tool=CompiledTool::new(Arc::new(Declared(schema))).unwrap();
+        assert!(tool.validator.is_valid(&json!({"tuple":["valid"]})));
+        assert!(!tool.validator.is_valid(&json!({"tuple":[1]})));
+        assert!(!tool.validator.is_valid(&json!({"tuple":["valid","extra"]})));
+    }
+    #[test]
+    fn unknown_dialect_and_external_dynamic_reference_are_rejected() {
+        for schema in [json!({"$schema":"https://unknown.invalid/schema","type":"object"}),json!({"type":"object","$dynamicRef":"https://outside.invalid/schema"})] {
+            assert!(CompiledTool::new(Arc::new(Declared(schema))).is_err());
+        }
+    }
 }
 
 struct Ready { call: ToolCall, tool: Arc<CompiledTool> }
@@ -326,9 +359,11 @@ async fn run_one(ready: Ready, ctx: RunContext, registry: Arc<Registry>, limits:
     let mut tool_run = ctx.clone(); tool_run.cancel = operation.clone();
     let tool_ctx = ToolContext { run: tool_run, call_id: call.id.clone(),
         progress: Arc::new(ProgressSink { bus: bus.clone(), item_id: tool_item_id(step, index) }) };
+    let started = Instant::now();
     let execution = bounded(&ctx.cancel, &operation,
         ctx.task.deadline().min(Instant::now() + limits.tool_timeout), limits.cancellation_grace,
         ready.tool.implementation.execute(tool_ctx, call.arguments.clone())).await;
+    ctx.task.record_tool_timing(started.elapsed());
     let (mut result, mut fatal) = match execution {
         Ok(output) => (ToolResult::from_output(&call.id, output), None),
         Err(error) => {

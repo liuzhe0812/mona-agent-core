@@ -20,11 +20,22 @@ use std::{
 
 pub const SESSION_KEY: &str = "mona.session_id";
 pub const TURN_KEY: &str = "mona.turn_id";
-const FORMAT: u32 = 3;
+const FORMAT: u32 = 5;
 const MAX_FILE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_SESSIONS: usize = 1000;
 const MAX_TURNS: usize = 512;
+
+/// Host-owned, namespaced state. It never becomes model input without explicit host projection.
+pub type HostState = std::collections::BTreeMap<String, serde_json::Value>;
+fn validate_state(state: &HostState) -> Result<()> {
+    if state.len() > 16 || state.keys().any(|key| key.is_empty() || key.len() > 64
+        || !key.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')))
+        || serde_json::to_vec(state).map_err(io_error)?.len() > 64 * 1024 {
+        return Err(error(Code::Capacity, "会话扩展状态超过名称或 64 KiB 容量限制。"));
+    }
+    Ok(())
+}
 
 pub(crate) fn error(code: Code, message: &str) -> SessionError {
     SessionError::new(code, message)
@@ -124,14 +135,18 @@ pub struct Turn {
     pub started_at: u64,
     pub finished_at: Option<u64>,
     pub status: Status,
+    pub steps: usize,
     pub start: usize,
     pub end: usize,
     pub usage: TaskUsage,
+    pub statistics: api::RunStatistics,
     pub error: Option<AgentError>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Body {
+    /// Current extension state, committed with this same session document, never a second store.
+    pub state: HostState,
     pub turns: Vec<Turn>,
     // The exact latest immutable API checkpoint; no parallel persisted-message vocabulary.
     // Earlier facts live in archive; base maps the current working prefix back to those facts.
@@ -317,6 +332,7 @@ impl Store {
         }
         let split = bytes.iter().position(|b| *b == b'\n').ok_or_else(corrupt)?;
         let body: Body = serde_json::from_slice(&bytes[split + 1..]).map_err(|_| corrupt())?;
+        validate_state(&body.state).map_err(|_| corrupt())?;
         if body.turns.len() != header.turn_count
             || body.turns.len() > MAX_TURNS
             || body.checkpoint.is_some() != body.checkpoint_turn.is_some()
@@ -341,7 +357,7 @@ impl Store {
             }
         }
         let doc = Document { header, body };
-        let mut end = 0;
+        let mut end = doc.origin_len()?;
         for (index, turn) in doc.body.turns.iter().enumerate() {
             if turn.start != end
                 || turn.end <= turn.start
@@ -367,6 +383,7 @@ impl Store {
         Ok(doc)
     }
     fn save(&self, doc: &mut Document, cancel: Option<&CancellationToken>) -> Result<()> {
+        validate_state(&doc.body.state)?;
         if cancel.is_some_and(CancellationToken::is_cancelled) {
             return Err(error(Code::Closed, "会话写入已取消。"));
         }
@@ -531,6 +548,7 @@ impl Store {
                 unread: false,
             },
             body: Body {
+                state: HostState::new(),
                 turns: Vec::new(),
                 checkpoint: None,
                 checkpoint_turn: None,
@@ -570,6 +588,20 @@ impl Store {
         let mut doc = self.load(id)?;
         Self::editable(&doc, revision)?;
         doc.header.title = title.into();
+        self.save(&mut doc, None)?;
+        Ok(doc.header)
+    }
+    /// Atomically mutate host extension state on an idle session. The pure callback must not
+    /// re-enter the Store or perform I/O. It receives the exact revision being committed.
+    pub fn update_state(&self, id: &str, revision: u64, key: &str,
+        update: impl FnOnce(&Document) -> Result<serde_json::Value>) -> Result<Header> {
+        if key == "sessions.origin" { return Err(error(Code::InvalidRequest, "初始历史身份不可修改。")); }
+        let _guard = self.gate.lock().map_err(io_error)?;
+        let mut doc = self.load(id)?;
+        Self::editable(&doc, revision)?;
+        let next = update(&doc)?;
+        if doc.body.state.get(key) == Some(&next) { return Ok(doc.header); }
+        doc.body.state.insert(key.to_owned(), next);
         self.save(&mut doc, None)?;
         Ok(doc.header)
     }
@@ -624,6 +656,17 @@ impl Store {
         admission_bytes: usize,
         check: impl FnOnce(&[Message]) -> Result<()>,
     ) -> Result<Prepared> {
+        self.prepare_with_context(id, revision, key, prompt, admission_bytes, |_, history| {
+            check(history)?;
+            Ok(std::collections::BTreeMap::new())
+        }).map(|(prepared, _)| prepared)
+    }
+    /// Host-only admission context from the exact current document, before its next workset
+    /// replaces the last checkpoint. Duplicates bypass this callback and never execute again.
+    pub fn prepare_with_context(
+        &self, id: &str, revision: u64, key: &str, prompt: &str, admission_bytes: usize,
+        check: impl FnOnce(&Document, &[Message]) -> Result<std::collections::BTreeMap<String, String>>,
+    ) -> Result<(Prepared, std::collections::BTreeMap<String, String>)> {
         validate_id(key)?;
         if prompt.trim().is_empty() || prompt.len() > 64 * 1024 {
             return Err(error(Code::InvalidRequest, "消息不能为空或超过 64 KiB。"));
@@ -634,15 +677,20 @@ impl Store {
             if turn.prompt != prompt {
                 return Err(error(Code::Conflict, "同一请求 ID 不能提交不同内容。"));
             }
-            return Ok(Prepared::Existing(turn.clone(), doc.header));
+            return Ok((Prepared::Existing(turn.clone(), doc.header), std::collections::BTreeMap::new()));
         }
         Self::editable(&doc, revision)?;
         if doc.body.turns.len() >= MAX_TURNS {
             return Err(error(Code::Capacity, "会话达到 512 轮上限，请新建会话。"));
         }
         let canonical_len = doc.history()?.len();
+        let history = doc.next_workset(self.compaction_enabled())?;
+        let metadata = check(&doc, &history)?;
+        if metadata.keys().any(|key| matches!(key.as_str(), SESSION_KEY | TURN_KEY))
+            || metadata.iter().map(|(k,v)| k.len().saturating_add(v.len())).sum::<usize>() > 14 * 1024 {
+            return Err(error(Code::Capacity, "宿主接纳上下文超限或覆盖了会话身份。"));
+        }
         let history = doc.begin_workset(self.compaction_enabled(), prompt, admission_bytes)?;
-        check(&history)?;
         if doc.body.turns.is_empty() && doc.header.title == "新会话" {
             doc.header.title = prompt
                 .chars()
@@ -657,6 +705,7 @@ impl Store {
             started_at: now_ms(),
             finished_at: None,
             status: Status::Running,
+            steps: 0,
             start: canonical_len,
             end: canonical_len + 1,
             usage: TaskUsage {
@@ -664,11 +713,12 @@ impl Store {
                 reported_tokens: 0,
                 usage_complete: false,
             },
+            statistics: api::RunStatistics::default(),
             error: None,
         });
         doc.header.status = Status::Running;
         self.save(&mut doc, None)?; // User input and durable dedup identity precede runtime dispatch.
-        Ok(Prepared::New { history })
+        Ok((Prepared::New { history }, metadata))
     }
     pub fn bind(&self, id: &str, key: &str, run_id: &str) -> Result<Header> {
         let _guard = self.gate.lock().map_err(io_error)?;
@@ -706,6 +756,13 @@ impl Store {
         self.save(&mut doc, None)
     }
     pub fn commit(&self, cp: &RunCheckpoint, cancel: &CancellationToken) -> Result<()> {
+        self.commit_with_state(cp, cancel, &HostState::new())
+    }
+    /// Commit a checkpoint and its derived host-state patches in the same atomic replacement.
+    /// No second persistence acknowledgement, callback or asynchronous side-channel is involved.
+    pub fn commit_with_state(&self, cp: &RunCheckpoint, cancel: &CancellationToken, patch: &HostState) -> Result<()> {
+        if patch.contains_key("sessions.origin") { return Err(error(Code::InvalidRequest, "检查点不能替换初始历史身份。")); }
+        validate_state(patch)?;
         let (Some(id), Some(key)) = (cp.metadata.get(SESSION_KEY), cp.metadata.get(TURN_KEY))
         else {
             if cp.metadata.contains_key(SESSION_KEY) || cp.metadata.contains_key(TURN_KEY) {
@@ -724,6 +781,7 @@ impl Store {
             if old.run_id == cp.run_id && old.revision == cp.revision {
                 return if serde_json::to_vec(old).map_err(io_error)?
                     == serde_json::to_vec(cp).map_err(io_error)?
+                    && patch.iter().all(|(key, value)| doc.body.state.get(key) == Some(value))
                 {
                     Ok(())
                 } else {
@@ -737,6 +795,7 @@ impl Store {
         if turn.status != Status::Running || cp.schema_version != CHECKPOINT_VERSION {
             return Err(corrupt());
         }
+        doc.body.state.extend(patch.clone());
         doc.body.turns[index].run_id = Some(cp.run_id.clone());
         doc.body.checkpoint = Some(cp.clone());
         doc.body.checkpoint_turn = Some(index);
@@ -754,7 +813,9 @@ impl Store {
         let end = doc.history()?.len();
         let turn = &mut doc.body.turns[index];
         turn.end = end;
+        turn.steps = cp.step;
         turn.usage = cp.task_usage.clone();
+        turn.statistics = cp.statistics.clone();
         if cp.phase == CheckpointPhase::RunFinished {
             let status = cp.status.ok_or_else(corrupt)?;
             turn.status = Status::from_run(status);
@@ -789,10 +850,12 @@ impl Store {
             return Err(corrupt());
         }
         turn.status = Status::from_run(report.status);
+        turn.steps = report.steps;
         turn.finished_at = Some(now_ms());
         turn.end = end;
         turn.error = report.error.clone();
         turn.usage = report.task_usage.clone();
+        turn.statistics = report.statistics.clone();
         doc.header.status = turn.status;
         self.save(&mut doc, None)
     }

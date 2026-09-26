@@ -37,6 +37,34 @@ fn spec(side_effects: bool) -> ToolSpec {
     }
 }
 #[tokio::test]
+async fn outside_history_path_does_not_block_project_instructions() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("workspace");
+    fs::create_dir(&root).unwrap();
+    let outside_file = temp.path().join("inaccessible-parent");
+    fs::write(&outside_file, "not a directory").unwrap();
+    fs::write(root.join("AGENTS.md"), "ROOT_RULE").unwrap();
+    let rules = ProjectInstructions::new(&root).unwrap();
+    let history = Message::Assistant {
+        content: String::new(),
+        tool_calls: vec![ToolCall::new(
+            "outside",
+            "write",
+            json!({"path": outside_file.join("file.txt")}),
+        )],
+        reasoning_content: None,
+        provider_data: None,
+    };
+    let blocks = rules.sources(&context(), &[history]).await.unwrap();
+    assert!(blocks[0].content.contains("ROOT_RULE"));
+    assert_eq!(
+        rules
+            .directory(root.join("new.txt").to_str().unwrap())
+            .unwrap(),
+        Some(rules.root.clone())
+    );
+}
+#[tokio::test]
 async fn scopes_refresh_without_elevating_rules_or_mistaking_them_for_user_turns() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();

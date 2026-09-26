@@ -71,7 +71,7 @@ pub fn router(
         .allow_methods([Method::GET, Method::POST, Method::DELETE])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     if let Some(origin) = origin {
-        if origin == "*" || !(origin.starts_with("http://") || origin.starts_with("https://")) {
+        if origin == "*" || !crate::ui_origin_allowed(&origin) {
             return Err(error("invalid_request", "explicit CORS origin required"));
         }
         cors = cors.allow_origin(
@@ -82,9 +82,11 @@ pub fn router(
     }
     Ok(Router::new()
         .route("/api/workbench/capabilities", get(capabilities))
+        .route("/api/workbench/session/{id}/statistics", get(statistics))
         .route("/api/workbench/{kind}/{id}/review", get(review))
         .route("/api/workbench/{kind}/{id}/diff", get(diff))
         .route("/api/workbench/{kind}/{id}/bytes", get(bytes))
+        .route("/api/workbench/{kind}/{id}/stat", get(file_stat))
         .route("/api/workbench/{kind}/{id}/terminals", post(open_terminal))
         .route(
             "/api/workbench/{kind}/{id}/terminals/{terminal}",
@@ -121,8 +123,36 @@ async fn disk<T: Send + 'static>(
 }
 async fn capabilities() -> Json<serde_json::Value> {
     Json(
-        serde_json::json!({"terminal":Terminals::enabled(),"review":true,"bytes":true,"side":true,"embedded_browser":false}),
+        serde_json::json!({"terminal":Terminals::enabled(),"review":true,"bytes":true,"side":true,"statistics":true,"embedded_browser":false}),
     )
+}
+async fn statistics(
+    State(s): State<Service>,
+    Path(id): Path<String>,
+) -> std::result::Result<Json<crate::conversation_metrics::Statistics>, Error> {
+    let permit = s.permit()?;
+    let value = disk(move || {
+        let _permit = permit;
+        s.workspaces
+            .environments
+            .factory
+            .context_meter
+            .session(&s.workspaces.store, &id)
+            .map_err(|e| {
+                error(
+                    match e.code {
+                        sessions::SessionErrorCode::InvalidRequest => "invalid_request",
+                        sessions::SessionErrorCode::NotFound => "not_found",
+                        sessions::SessionErrorCode::Conflict => "conflict",
+                        sessions::SessionErrorCode::Capacity => "capacity",
+                        _ => "io",
+                    },
+                    &e.message,
+                )
+            })
+    })
+    .await?;
+    Ok(Json(value))
 }
 async fn review(
     State(s): State<Service>,
@@ -163,6 +193,24 @@ async fn diff(
 struct BytesQuery {
     path: String,
     revision: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StatQuery {
+    path: String,
+}
+async fn file_stat(
+    State(s): State<Service>,
+    Path((kind, id)): Path<(String, String)>,
+    Query(q): Query<StatQuery>,
+) -> std::result::Result<Json<workspace::Entry>, Error> {
+    let permit = s.permit()?;
+    let value = disk(move || {
+        let _permit = permit;
+        s.workspaces.directory(&kind, &id)?.stat(&q.path)
+    })
+    .await?;
+    Ok(Json(value))
 }
 async fn bytes(
     State(s): State<Service>,

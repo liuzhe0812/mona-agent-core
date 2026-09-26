@@ -51,7 +51,7 @@ impl Tool for WriteTool {
         let path_text = path.display().to_string();
         let bytes = args.content.into_bytes();
         let byte_count = bytes.len();
-        mutate_file(path.clone(), &ctx, move |_| Ok(bytes)).await?;
+        mutate_file(path.clone(), &ctx, &self.config, move |_| Ok(bytes)).await?;
         ctx.run.task.check()?;
 
         let detail = json!({

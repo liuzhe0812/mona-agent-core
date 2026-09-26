@@ -12,6 +12,8 @@
 
 Responses 使用 `store:false` 和 `reasoning.encrypted_content`；只发送本地保存的完整输入，不使用 previous_response_id、conversation 或后台执行。Messages 连续工具结果作为同一 user 消息的 tool_result 块发送；system 单独映射。工具声明和执行仍由原 Runtime 管理。
 
+用量继续报告完整输入与输出，缓存读取和写入作为输入中的可选分项。Chat Completions 读取常见的缓存字段位置，Responses 读取输入详情，Messages 将其独立的缓存字段计入输入总量并保留分项。Chat/Responses 有独立的总输入字段，缓存详情缺失或不一致时只将分项标为未知；Messages 的缓存字段参与总量计算，格式错误或加法溢出仍是协议错误。未知分项不能凭空显示命中率。
+
 非成功响应只读取有界错误正文用于分类，不把正文、Prompt 或凭据写入错误消息。分类优先读取 `error.code`/`error.type` 的已知标识；401/403 按鉴权、402 按额度优先，409 默认是确定性请求错误，只有明确的临时故障标识才进入限流或服务端分类。严格匹配的标准 `message` 仅作为回退，不扫描任意正文。适配器区分鉴权、额度、限流、服务端、确定性请求错误、上下文超限和一般传输故障，并保留可用的 HTTP 状态与 `Retry-After`。适配器本身不重试；统一 Runtime 网关负责预算、取消、审计和恢复策略。 Messages 的 `invalid_request_error` 加完整 `prompt is too long` 格式明确映射到上下文超限；带数量时检查 `输入 tokens > 最大值 maximum`，不靠任意正文子串推断。此错误格式参照 [Claude 上下文溢出说明](https://platform.claude.com/docs/en/build-with-claude/context-windows)。
 
 `context_window_tokens` 只对配置的 `ChatConfig.model`（或未指定覆盖模型的请求）生效；请求选择备用模型时返回 `None`。SSE 回传的 replay tool index 使用 API 的独立 `MAX_TOOL_CALLS_PER_STEP` 上限，不受 UI 快照保留量影响。

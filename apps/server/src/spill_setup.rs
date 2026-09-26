@@ -209,7 +209,7 @@ pub fn router(
         .allow_methods([Method::GET])
         .allow_headers([header::AUTHORIZATION]);
     if let Some(origin) = origin {
-        if origin == "*" || !(origin.starts_with("https://") || origin.starts_with("http://")) {
+        if origin == "*" || !crate::ui_origin_allowed(&origin) {
             return Err("spill reads require an explicit HTTP(S) origin".into());
         }
         cors = cors.allow_origin(origin.parse::<HeaderValue>()?);

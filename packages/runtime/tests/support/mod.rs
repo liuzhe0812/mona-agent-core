@@ -24,13 +24,13 @@ impl Model for ScriptModel {
 }
 pub fn answer(text: &str) -> Vec<ModelEvent> {
     vec![ModelEvent::Text(text.into()), ModelEvent::Finish(FinishReason::Stop),
-        ModelEvent::Usage(Usage { input_tokens: 10, output_tokens: 5 }), ModelEvent::End]
+        ModelEvent::Usage(Usage { input_tokens: 10, output_tokens: 5, cache_read_tokens: None, cache_write_tokens: None }), ModelEvent::End]
 }
 pub fn calls(items: &[(&str, &str, Value)]) -> Vec<ModelEvent> {
     let mut events = items.iter().enumerate().map(|(index, (id, name, args))| ModelEvent::ToolDelta {
         index, id: Some((*id).into()), name: Some((*name).into()), arguments: args.to_string(),
     }).collect::<Vec<_>>();
-    events.extend([ModelEvent::Finish(FinishReason::ToolCalls), ModelEvent::Usage(Usage { input_tokens: 10, output_tokens: 5 }), ModelEvent::End]);
+    events.extend([ModelEvent::Finish(FinishReason::ToolCalls), ModelEvent::Usage(Usage { input_tokens: 10, output_tokens: 5, cache_read_tokens: None, cache_write_tokens: None }), ModelEvent::End]);
     events
 }
 pub fn call(id: &str) -> Vec<ModelEvent> { calls(&[(id, "count", json!({"value":1}))]) }

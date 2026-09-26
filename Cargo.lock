@@ -913,6 +913,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ef6b89e5b37196644d8796de5268852ff179b44e96276cf4290264843743bb7"
 
 [[package]]
+name = "enumflags2"
+version = "0.7.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1027f7680c853e056ebcec683615fb6fbbc07dbaa13b4d5d9442b146ded4ecef"
+dependencies = [
+ "enumflags2_derive",
+]
+
+[[package]]
+name = "enumflags2_derive"
+version = "0.7.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67c78a4d8fdf9953a5c9d458f9efe940fd97a0cab0941c075a813ac594733827"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2065,6 +2085,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "landlock"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cca98e95f35b29d469dade6724c6f96cec9236640f745a0e99b0334ec320ab1"
+dependencies = [
+ "enumflags2",
+ "libc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2599,8 +2630,14 @@ version = "0.3.0"
 dependencies = [
  "api",
  "async-trait",
+ "compaction",
+ "futures-util",
+ "runtime",
  "serde",
  "serde_json",
+ "sessions",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -3227,6 +3264,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sandbox"
+version = "0.3.0"
+dependencies = [
+ "landlock",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "schemars"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3525,17 +3576,20 @@ dependencies = [
  "instructions",
  "memory",
  "models",
+ "planner",
  "portable-pty",
  "projects",
  "providers",
  "reqwest 0.12.28",
  "runtime",
+ "sandbox",
  "serde",
  "serde_json",
  "sessions",
  "sha2",
  "skills",
  "spill",
+ "subagent",
  "subtle",
  "tauri-plugin-bridge",
  "tempfile",
@@ -3760,6 +3814,22 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "subagent"
+version = "0.3.0"
+dependencies = [
+ "api",
+ "futures-util",
+ "runtime",
+ "serde",
+ "serde_json",
+ "sessions",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+]
 
 [[package]]
 name = "subtle"
@@ -4351,6 +4421,7 @@ dependencies = [
  "ignore",
  "image",
  "process-wrap",
+ "sandbox",
  "serde",
  "serde_json",
  "similar",

@@ -368,6 +368,15 @@ fn private_state_preserves_order_signatures_and_exact_route_but_never_becomes_vi
             }
         );
         assert_eq!(usage.output_tokens, 8);
+        assert_eq!(usage.cache_read_tokens, Some(3));
+        assert_eq!(
+            usage.cache_write_tokens,
+            if protocol == Protocol::Messages {
+                Some(4)
+            } else {
+                Some(0)
+            }
+        );
     }
 }
 #[test]
@@ -464,6 +473,28 @@ fn protocol_completion_and_signed_replay_are_required() {
     }
     panic!("contradicting terminal tool result accepted");
 }
+
+#[test]
+fn responses_invalid_or_over_budget_cache_usage_keeps_reported_totals() {
+    for cached in [json!("bad"), json!(13)] {
+        let mut frames = response_frames(false, false);
+        frames.last_mut().unwrap()["response"]["usage"]["input_tokens_details"]["cached_tokens"] =
+            cached;
+        let events = decode(Protocol::Responses, frames, "route".into());
+        let usage = events
+            .iter()
+            .find_map(|event| match event {
+                ModelEvent::Usage(usage) => Some(usage),
+                _ => None,
+            })
+            .expect("terminal usage is available");
+        assert_eq!(usage.input_tokens, 12);
+        assert_eq!(usage.output_tokens, 8);
+        assert_eq!(usage.cache_read_tokens, None);
+        assert_eq!(usage.cache_write_tokens, None);
+    }
+}
+
 async fn fixture(
     protocol: Protocol,
     body: String,

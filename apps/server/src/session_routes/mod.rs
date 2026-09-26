@@ -1,5 +1,6 @@
 //! Web-only session routes, safe projections and deployment path selection.
 mod view;
+#[cfg(feature = "subagent")] mod subagents;
 #[cfg(test)] mod tests;
 
 use sessions::{Store, Header, Listing, SessionError, SessionErrorCode, SessionResult};
@@ -97,10 +98,50 @@ pub fn router(
     if !(32..=512).contains(&token.len()) || !token.bytes().all(|b| b.is_ascii_graphic()) { return Err("invalid session bearer token".into()); }
     let mut cors = CorsLayer::new().allow_methods([Method::GET, Method::POST]).allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     if let Some(origin) = origin {
-        if origin == "*" || !(origin.starts_with("http://") || origin.starts_with("https://")) { return Err("session CORS needs an explicit origin".into()); }
+        if origin == "*" || !crate::ui_origin_allowed(&origin) { return Err("session CORS needs an explicit origin".into()); }
         cors = cors.allow_origin(origin.parse::<HeaderValue>()?);
     }
-    Ok(Router::new()
+    let tasks = SessionApplication::new(store.clone(), app);
+    #[cfg(feature = "planner")]
+    let context = crate::planning::context(workspaces.as_ref().is_some_and(|w|
+        !w.environments.factory.demo && w.environments.factory.capabilities.active(crate::capabilities::PLANNER)));
+    #[cfg(not(feature = "planner"))]
+    let context: application::sessions::SessionContext = Arc::new(|doc| {
+        if doc.body.state.get("planner").and_then(|v| v.get("mode")).and_then(|v| v.as_str()) == Some("plan_only") {
+            return Err(SessionError::new(SessionErrorCode::InvalidRequest, "此会话处于计划模式，但当前构建不含 Planner。"));
+        }
+        Ok(std::collections::BTreeMap::new())
+    });
+    #[cfg(feature = "sandbox")]
+    let sandbox = workspaces.as_ref().map(|w| (w.environments.factory.sandbox.clone(),
+        !w.environments.factory.demo && w.environments.factory.capabilities.active(crate::capabilities::SANDBOX)));
+    let tasks = tasks.with_context(Arc::new(move |doc| {
+        if doc.header.metadata.contains_key("subagent.root") {
+            return Err(SessionError::new(SessionErrorCode::InvalidRequest, "子会话只能通过所属主任务委派继续，不能绕过预算独立启动。"));
+        }
+        #[allow(unused_mut)]
+        let mut metadata = context(doc)?;
+        #[cfg(feature = "sandbox")]
+        if let Some((sandbox, active)) = &sandbox { metadata.extend(sandbox.metadata(doc, *active)?); }
+        else { crate::sandbox_setup::require_unconfined(doc)?; }
+        #[cfg(not(feature = "sandbox"))]
+        crate::sandbox_setup::require_unconfined(doc)?;
+        Ok(metadata)
+    }));
+    let router = Router::new();
+    #[cfg(feature = "subagent")]
+    let router = router.route("/api/subagents", get(subagents::settings).post(subagents::save_settings))
+        .route("/api/sessions/{id}/agents", get(subagents::list))
+        .route("/api/sessions/{id}/agents/{child}", get(subagents::detail))
+        .route("/api/sessions/{id}/agents/{child}/interrupt", post(subagents::interrupt))
+        .route("/api/sessions/{id}/agents/{child}/message", post(subagents::message))
+        .route("/api/sessions/{id}/agents/{child}/followup", post(subagents::followup));
+    #[cfg(feature = "planner")]
+    let router = router.route("/api/sessions/{id}/plan", get(get_plan).post(change_plan));
+    #[cfg(feature = "sandbox")]
+    let router = router.route("/api/sandbox", get(default_sandbox))
+        .route("/api/sessions/{id}/sandbox", get(get_sandbox).post(change_sandbox));
+    Ok(router
         .route("/api/sessions", get(list).post(create))
         .route("/api/sessions/{id}", get(detail))
         .route("/api/sessions/{id}/turns", post(start))
@@ -110,15 +151,59 @@ pub fn router(
         .route("/api/sessions/{id}/archive", post(archive))
         .route("/api/sessions/{id}/unread", post(unread))
         .route("/api/sessions/{id}/delete", post(delete))
-        .with_state(Service { tasks: SessionApplication::new(store.clone(), app), store, workspaces, side })
+        .with_state(Service { tasks, store, workspaces, side })
         .layer(DefaultBodyLimit::max(128 * 1024))
         .layer(middleware::from_fn_with_state(Arc::new(Auth(token)), authenticate)).layer(cors))
 }
+#[cfg(feature = "planner")]
+fn planner_enabled(s: &Service) -> bool {
+    s.workspaces.as_ref().is_some_and(|w| !w.environments.factory.demo
+        && w.environments.factory.capabilities.active(crate::capabilities::PLANNER))
+}
+#[cfg(feature = "planner")]
+async fn get_plan(State(s): State<Service>, Path(id): Path<String>) -> std::result::Result<Json<crate::planning::PlanView>, HttpError> {
+    let enabled = planner_enabled(&s);
+    Ok(Json(disk(move || crate::planning::view(s.store.get(&id)?, enabled)).await?))
+}
+#[cfg(feature = "planner")]
+async fn change_plan(State(s): State<Service>, Path(id): Path<String>, value: std::result::Result<Json<crate::planning::PlanAction>, JsonRejection>) -> std::result::Result<Json<crate::planning::PlanView>, HttpError> {
+    let request = body(value)?;
+    let enabled = planner_enabled(&s);
+    Ok(Json(disk(move || {
+        crate::planning::change(&s.store, &id, request, enabled)?;
+        crate::planning::view(s.store.get(&id)?, enabled)
+    }).await?))
+}
+#[cfg(feature = "sandbox")]
+fn sandbox_host(s: &Service) -> std::result::Result<(Arc<crate::sandbox_setup::SandboxHost>, bool), HttpError> {
+    let factory = &s.workspaces.as_ref().ok_or_else(|| error(Code::NotFound, "当前宿主未装配沙箱管理。"))?.environments.factory;
+    Ok((factory.sandbox.clone(), !factory.demo && factory.capabilities.active(crate::capabilities::SANDBOX)))
+}
+#[cfg(feature = "sandbox")]
+async fn default_sandbox(State(s): State<Service>) -> std::result::Result<Json<crate::sandbox_setup::SandboxView>, HttpError> {
+    let (host, active) = sandbox_host(&s)?;
+    Ok(Json(host.view(None, active).await.map_err(ApplicationError::from)?))
+}
+#[cfg(feature = "sandbox")]
+async fn get_sandbox(State(s): State<Service>, Path(id): Path<String>) -> std::result::Result<Json<crate::sandbox_setup::SandboxView>, HttpError> {
+    let (host, active) = sandbox_host(&s)?;
+    let doc = disk(move || s.store.get(&id)).await?;
+    Ok(Json(host.view(Some(doc), active).await.map_err(ApplicationError::from)?))
+}
+#[cfg(feature = "sandbox")]
+async fn change_sandbox(State(s): State<Service>, Path(id): Path<String>, value: std::result::Result<Json<crate::sandbox_setup::SandboxAction>, JsonRejection>) -> std::result::Result<Json<crate::sandbox_setup::SandboxView>, HttpError> {
+    let request = body(value)?;
+    let (host, active) = sandbox_host(&s)?; let update = host.clone();
+    let doc = disk(move || { update.change(&s.store, &id, request, active)?; s.store.get(&id) }).await?;
+    Ok(Json(host.view(Some(doc), active).await.map_err(ApplicationError::from)?))
+}
+
 async fn list(State(s): State<Service>, q: std::result::Result<Query<ListQuery>, axum::extract::rejection::QueryRejection>) -> std::result::Result<Json<Listing>, HttpError> {
     let q = query(q)?;
     let archived = q.archived.unwrap_or(false);
     let project_ids = s.workspaces.as_ref().map(|w| w.project_ids()).transpose()?.unwrap_or_default();
     Ok(Json(disk(move || s.store.list_matching(q.offset.unwrap_or(0), q.limit.unwrap_or(50), q.q.as_deref().unwrap_or(""), archived, |h| {
+        if h.metadata.contains_key("subagent.root") { return false; }
         match q.project_id.as_deref() {
             None => true,
             Some("") => h.metadata.get("project.id").is_none_or(|id| !project_ids.contains(id)),
@@ -155,6 +240,21 @@ async fn rename(State(s): State<Service>, Path(id): Path<String>, value: std::re
 async fn delete(State(s): State<Service>, Path(id): Path<String>, value: std::result::Result<Json<Revision>, JsonRejection>) -> std::result::Result<StatusCode, HttpError> {
     let value = body(value)?;
     let sid = id.clone(); disk(move || s.store.delete(&sid, value.revision)).await?;
+    #[cfg(feature = "subagent")]
+    if let Some(workspaces) = &s.workspaces {
+        let removed=workspaces.environments.factory.subagents.service.purge_deleted_root(&id).await
+            .map_err(|e|error(Code::Internal,&format!("主记录已删除，但子记录清理失败：{}",e.message)))?;
+        #[cfg(feature = "sandbox")]
+        for child in removed {workspaces.environments.factory.sandbox.provider.release_session(&child).await
+            .map_err(|e|error(Code::Internal,&format!("子记录已删除，但临时资源清理失败：{e}")))?;}
+        #[cfg(not(feature = "sandbox"))]
+        let _=removed;
+    }
+    #[cfg(feature = "sandbox")]
+    if let Some(workspaces) = &s.workspaces {
+        workspaces.environments.factory.sandbox.provider.release_session(&id).await
+            .map_err(|e| error(Code::Internal, &format!("会话已删除，但沙箱临时资源清理失败：{e}")))?;
+    }
     if let Some(side) = s.side { side.drop_parent(&id); }
     Ok(StatusCode::NO_CONTENT)
 }

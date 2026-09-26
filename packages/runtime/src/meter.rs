@@ -79,6 +79,8 @@ mod tests {
                 Ok(ModelEvent::Usage(Usage {
                     input_tokens: tokens,
                     output_tokens: 3,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
                 })),
                 Ok(ModelEvent::Finish(FinishReason::Stop)),
                 Ok(ModelEvent::End),
@@ -131,6 +133,8 @@ mod tests {
             Some(Usage {
                 input_tokens: 37,
                 output_tokens: 2,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             }),
         );
         assert_eq!(meter.estimate(&original).unwrap().tokens, 37);

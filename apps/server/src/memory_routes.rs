@@ -174,7 +174,7 @@ pub fn router(
         .allow_methods([Method::GET, Method::POST])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     if let Some(origin) = origin {
-        if origin == "*" || !(origin.starts_with("http://") || origin.starts_with("https://")) {
+        if origin == "*" || !crate::ui_origin_allowed(&origin) {
             return Err(api::AgentError::new(
                 api::ErrorCode::Configuration,
                 "memory CORS requires explicit origin",

@@ -27,6 +27,9 @@ pub const INSTRUCTIONS: &str = "instructions";
 pub const MEMORY: &str = "memory";
 pub const MEMORY_UPDATE: &str = "memory_update";
 pub const HISTORY_SEARCH: &str = "history-search";
+pub const PLANNER: &str = "planner";
+pub const SANDBOX: &str = "sandbox";
+pub const SUBAGENT: &str = "subagent";
 pub const GREP: &str = "grep";
 pub const FIND: &str = "find";
 pub const LS: &str = "ls";
@@ -78,7 +81,7 @@ impl Default for DeploymentFile {
                 user_configurable: true,
             },
         );
-        for (id, enabled) in [(MEMORY, cfg!(feature = "memory")), (HISTORY_SEARCH, cfg!(feature = "history-search")), (MEMORY_UPDATE, false)] {
+        for (id, enabled) in [(MEMORY, cfg!(feature = "memory")), (HISTORY_SEARCH, cfg!(feature = "history-search")), (PLANNER, cfg!(feature = "planner")), (SANDBOX, cfg!(feature = "sandbox")), (SUBAGENT, cfg!(feature = "subagent")), (MEMORY_UPDATE, false)] {
             capabilities.insert(id.into(), CapabilityPolicy { enabled, user_configurable: true });
         }
         for id in FIXED_TOOLS {
@@ -176,6 +179,9 @@ impl CapabilityManager {
                     | MEMORY
                     | MEMORY_UPDATE
                     | HISTORY_SEARCH
+                    | PLANNER
+                    | SANDBOX
+                    | SUBAGENT
                     | "read"
                     | "shell"
                     | "edit"
@@ -228,6 +234,16 @@ impl CapabilityManager {
         self.inner.active.get(id).copied().unwrap_or(false)
     }
 
+    /// Product-only inventory, including fixed and inactive capabilities. Never a permission token.
+    pub fn assembly(&self) -> BTreeMap<String, serde_json::Value> {
+        let state = self.inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.inner.policies.iter().map(|(id, policy)| {
+            let enabled = desired(id, policy, &state);
+            let active = self.active(id);
+            (id.clone(), serde_json::json!({"compiled":compiled(id),"enabled":enabled,"active":active,
+                "configurable":policy.user_configurable,"restart_required":enabled != active}))
+        }).collect()
+    }
     pub fn view(&self) -> CapabilityView {
         let state = self
             .inner
@@ -339,6 +355,9 @@ fn compiled(id: &str) -> bool {
         SPILL => cfg!(feature = "spill"),
         MEMORY | MEMORY_UPDATE => cfg!(feature = "memory"),
         HISTORY_SEARCH => cfg!(feature = "history-search"),
+        PLANNER => cfg!(feature = "planner"),
+        SANDBOX => cfg!(feature = "sandbox"),
+        SUBAGENT => cfg!(feature = "subagent"),
         "read" | "shell" | "edit" | "write" | GREP | FIND | LS | INSTRUCTIONS => true,
         _ => false,
     }
@@ -359,6 +378,9 @@ struct Metadata {
 
 fn manageable_metadata() -> Vec<Metadata> {
     vec![
+        Metadata { id: SUBAGENT, name: "子 Agent", description: "有限并行委派，父子共用预算和权限边界；保留独立记录。", kind: CapabilityKind::Component },
+        Metadata { id: SANDBOX, name: "本地沙箱", description: "限制 Agent Shell 与文件修改；模式由输入框选择，不限制读取和联网。", kind: CapabilityKind::Component },
+        Metadata { id: PLANNER, name: "计划管理", description: "同一个 Agent 按需维护计划；显式计划模式只调研，普通任务不额外审批。", kind: CapabilityKind::Component },
         Metadata { id: MEMORY, name: "长期记忆", description: "按授权范围注入少量精选长期事实；关闭不删除已保存记忆。", kind: CapabilityKind::Component },
         Metadata { id: HISTORY_SEARCH, name: "历史会话检索", description: "按需搜索和读取已保存原文，不影响会话保存与恢复。", kind: CapabilityKind::Component },
         Metadata { id: MEMORY_UPDATE, name: "Agent 更新记忆", description: "授权 Agent 新增、纠正或删除长期记忆，不逐次确认；需要启用长期记忆组件。", kind: CapabilityKind::Tool },
@@ -489,6 +511,15 @@ pub fn from_environment(args: &[String]) -> Result<CapabilityManager, Box<dyn st
             },
         );
     }
+    if std::env::var("AGENT_SUBAGENT").as_deref() == Ok("0") {
+        deployment.capabilities.insert(SUBAGENT.into(), CapabilityPolicy { enabled: false, user_configurable: false });
+    }
+    if std::env::var("AGENT_SANDBOX").as_deref() == Ok("0") {
+        if std::env::var_os("AGENT_SANDBOX_MODE").is_some() { return Err("AGENT_SANDBOX=0 conflicts with AGENT_SANDBOX_MODE".into()); }
+        deployment.capabilities.insert(SANDBOX.into(), CapabilityPolicy { enabled: false, user_configurable: false });
+    } else if std::env::var_os("AGENT_SANDBOX_MODE").is_some() {
+        deployment.capabilities.insert(SANDBOX.into(), CapabilityPolicy { enabled: true, user_configurable: false });
+    }
     let state_path = match std::env::var_os("AGENT_CAPABILITY_STATE_PATH") {
         Some(value) => PathBuf::from(value),
         None => state_root()?
@@ -521,7 +552,7 @@ fn read_state(path: &FilePath) -> Result<UserState, Box<dyn std::error::Error>> 
     Ok(state)
 }
 
-fn write_state(path: &FilePath, state: &UserState) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn write_state(path: &FilePath, state: &impl Serialize) -> Result<(), Box<dyn std::error::Error>> {
     let parent = path
         .parent()
         .filter(|value| !value.as_os_str().is_empty())
@@ -557,13 +588,14 @@ pub fn router(
         .allow_methods([Method::GET, Method::PUT])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     if let Some(origin) = origin {
-        if origin == "*" || !(origin.starts_with("https://") || origin.starts_with("http://")) {
+        if origin == "*" || !crate::ui_origin_allowed(&origin) {
             return Err("capability management requires an explicit HTTP(S) origin".into());
         }
         cors = cors.allow_origin(origin.parse::<HeaderValue>()?);
     }
     Ok(Router::new()
         .route("/api/capabilities", get(get_capabilities))
+        .route("/api/ui", get(ui_modules))
         .route("/api/capabilities/{id}", put(update_capability))
         .with_state(manager)
         .layer(DefaultBodyLimit::max(16 * 1024))
@@ -572,6 +604,17 @@ pub fn router(
             authenticate,
         ))
         .layer(cors))
+}
+
+async fn ui_modules(State(manager): State<CapabilityManager>) -> Json<serde_json::Value> {
+    let mut modules = vec!["capabilities", "workspace", "workbench", "side", "metrics"];
+    if manager.active(MODEL_MANAGEMENT) { modules.push("models"); }
+    // Management remains available when disabled; operations use actual active flags.
+    if cfg!(feature = "memory") || cfg!(feature = "history-search") { modules.push("memory"); }
+    if cfg!(feature = "planner") { modules.push("planner"); }
+    if cfg!(feature = "sandbox") { modules.push("sandbox"); }
+    if cfg!(feature = "subagent") { modules.push("subagent"); }
+    Json(serde_json::json!({"version":1,"modules":modules,"capabilities":manager.assembly()}))
 }
 
 async fn authenticate(State(auth): State<Arc<Auth>>, request: Request, next: Next) -> Response {

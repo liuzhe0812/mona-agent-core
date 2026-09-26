@@ -26,6 +26,7 @@ fn checkpoint(id: &str, key: &str, messages: Vec<Message>) -> RunCheckpoint {
             reported_tokens: 3,
             usage_complete: true,
         },
+        statistics: RunStatistics::default(),
         status: None,
         error: None,
     }
@@ -65,6 +66,11 @@ fn crash_recovery_closes_pending_pairs_without_claiming_rollback_or_replaying() 
     cp.phase = CheckpointPhase::ToolSettled {
         call_id: "c".into(),
     };
+    cp.statistics.input_tokens = 100;
+    cp.statistics.cache_read_tokens = Some(80);
+    cp.statistics.context = Some(ContextUsage { tokens: Some(100), capacity: Some(1000),
+        provider_anchored: true, observed_at: 1, system_tokens: Some(20),
+        tool_tokens: Some(30), message_tokens: Some(50) });
     cp.pending_tools = BTreeMap::from([
         ("a".into(), CheckpointToolState::Pending),
         ("b".into(), CheckpointToolState::IntentRecorded),
@@ -80,6 +86,9 @@ fn crash_recovery_closes_pending_pairs_without_claiming_rollback_or_replaying() 
     let store = Store::open(&base, tmp.path()).unwrap();
     let doc = store.get(&h.id).unwrap();
     assert_eq!(doc.header.status, Status::Interrupted);
+    assert_eq!(doc.body.turns[0].steps, 1);
+    assert_eq!(doc.body.turns[0].statistics.cache_read_tokens, Some(80));
+    assert_eq!(doc.body.turns[0].statistics.context.as_ref().unwrap().tokens, Some(100));
     assert_eq!(
         serde_json::to_value(doc.body.checkpoint.as_ref().unwrap()).unwrap(),
         serde_json::to_value(&cp).unwrap()

@@ -22,6 +22,7 @@ pub struct View {
     pub default_root: String,
     pub locked: bool,
     pub projects_enabled: bool,
+    pub project_create_mode: &'static str,
 }
 pub struct WorkspaceSettings {
     path: PathBuf,
@@ -34,6 +35,9 @@ fn io(_: impl std::fmt::Display) -> workspace::Error {
     error("io", "工作区配置无法读写；原配置保持不变。")
 }
 pub fn state_root() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("MONA_STATE_DIR").filter(|s| !s.is_empty()) {
+        return Ok(PathBuf::from(path));
+    }
     if let Some(path) = std::env::var_os("MONA_DEV_STATE_DIR").filter(|s| !s.is_empty()) {
         return Ok(PathBuf::from(path));
     }
@@ -80,6 +84,7 @@ impl WorkspaceSettings {
             "AGENT_SPILL_DIR",
             "AGENT_MEMORY_DIR",
             "AGENT_MODEL_SETTINGS_PATH",
+            "AGENT_SUBAGENT_SETTINGS_PATH",
             "AGENT_CAPABILITY_STATE_PATH",
             "AGENT_PROJECTS_PATH",
         ] {
@@ -168,6 +173,7 @@ impl WorkspaceSettings {
             default_root: s.default_root.clone(),
             locked: self.locked,
             projects_enabled,
+            project_create_mode: "none",
         })
     }
     pub fn private_paths(&self) -> Vec<PathBuf> {
@@ -220,6 +226,7 @@ impl WorkspaceSettings {
             default_root: current.default_root.clone(),
             locked: false,
             projects_enabled: false,
+            project_create_mode: "none",
         })
     }
     /// Caller supplies explicit project/embedding roots only after authorization. No project dependency here.

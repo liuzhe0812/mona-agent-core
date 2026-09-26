@@ -9,6 +9,10 @@ mod search;
 mod shell;
 mod support;
 mod write;
+#[cfg(feature = "sandbox")]
+mod confinement;
+#[cfg(feature = "sandbox")]
+pub use confinement::SandboxBinding;
 
 pub use archive::OutputArchive;
 pub use edit::EditTool;
@@ -31,6 +35,9 @@ pub struct ToolConfig {
     pub read_extensions: Vec<Arc<dyn ReadExtension>>,
     /// Optional output-retention capability supplied together with its read extension.
     pub output_archive: Option<Arc<dyn OutputArchive>>,
+    /// Optional native process confinement and the matching direct-file policy.
+    #[cfg(feature = "sandbox")]
+    pub sandbox: Option<SandboxBinding>,
 }
 
 impl ToolConfig {
@@ -44,6 +51,8 @@ impl ToolConfig {
             max_search_results: 1_000,
             read_extensions: Vec::new(),
             output_archive: None,
+            #[cfg(feature = "sandbox")]
+            sandbox: None,
         }
     }
 }

@@ -232,7 +232,7 @@ pub fn router(
         .allow_methods([Method::POST, Method::DELETE])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     if let Some(origin) = origin {
-        if origin == "*" || !(origin.starts_with("http://") || origin.starts_with("https://")) {
+        if origin == "*" || !crate::ui_origin_allowed(&origin) {
             return Err("side conversation requires explicit CORS origin".into());
         }
         cors = cors.allow_origin(origin.parse::<HeaderValue>()?);

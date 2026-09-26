@@ -28,11 +28,11 @@ future cancels that Run, without cancelling a shared task or another Run. `start
 and ordinary `wait()` remain passive; a detached observer does not cancel execution.
 The trusted request audit contains an internal `managed:<provider>:<revision>:<sequence>`
 selector; the router replaces it with the actual model ID at the adapter boundary.
-Per-run model overrides and crash recovery are not implemented by this module.
+Trusted hosts can use `runtime_for(runtime, Selection)` to bind an explicit provider/model for a new Run without changing the saved default. `bound_selection(options)` identifies an existing managed binding; a child inheriting the parent's options reuses that pinned route rather than consulting a later global default. Endpoints and credentials remain inside the manager. These are Rust host APIs, not unrestricted model-tool or browser overrides. Recovery of conversation records belongs to Sessions.
 
 ## History preflight and model switching
 
-`ManagedRuntime::validate_history` checks the current default adapter locally. It is
+`ManagedRuntime::validate_history` checks the configured explicit selection, or the current default adapter, locally. It is
 not a model reservation: `start` binds the actual selected model and checks again
 before the engine starts or any context transform calls a summarizer. Router and
 session wrappers forward the same hook. Plain histories can switch; incompatible

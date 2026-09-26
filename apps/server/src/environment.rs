@@ -41,8 +41,13 @@ fn config_error(e: impl std::fmt::Display) -> AgentError {
 
 pub struct Factory {
     pub store: Arc<sessions::Store>,
+    pub context_meter: Arc<crate::conversation_metrics::ContextMeter>,
     pub capabilities: capabilities::CapabilityManager,
     pub demo: bool,
+    #[cfg(feature = "subagent")]
+    pub subagents: Arc<crate::subagent_setup::SubagentHost>,
+    #[cfg(feature = "sandbox")]
+    pub sandbox: Arc<crate::sandbox_setup::SandboxHost>,
     #[cfg(feature = "memory")]
     pub memory: Option<Arc<crate::memory_routes::MemoryHost>>,
     #[cfg(feature = "history-search")]
@@ -61,10 +66,13 @@ impl Factory {
         store: Arc<sessions::Store>,
         capabilities: capabilities::CapabilityManager,
         demo: bool,
+        model_store_key: Option<String>,
     ) -> HostResult<Self> {
+        #[cfg(not(feature = "model-management"))]
+        let _ = &model_store_key;
         #[cfg(feature = "model-management")]
         let manager = if !demo && capabilities.active("model-management") {
-            Some(crate::model_settings::from_environment().map_err(config_error)?)
+            Some(crate::model_settings::from_environment(model_store_key).map_err(config_error)?)
         } else {
             None
         };
@@ -125,8 +133,15 @@ impl Factory {
             let source = store.clone();
             Some(tokio::task::spawn_blocking(move || sessions::search::HistorySearch::open(source)).await??)
         } else { None };
+        #[cfg(feature = "subagent")]
+        let subagents = crate::subagent_setup::SubagentHost::from_environment(store.clone(), demo)?;
         Ok(Self {
             store,
+            #[cfg(feature = "subagent")]
+            subagents,
+            context_meter: Arc::new(crate::conversation_metrics::ContextMeter::default()),
+            #[cfg(feature = "sandbox")]
+            sandbox: Arc::new(crate::sandbox_setup::SandboxHost::from_environment()?),
             #[cfg(feature = "memory")]
             memory,
             #[cfg(feature = "history-search")]
@@ -151,6 +166,12 @@ impl Factory {
         // No-directory environment is solely a model validator; it cannot execute tasks.
         let mut config =
             tools::ToolConfig::new(root.clone().unwrap_or_default(), self.shell.clone());
+        #[cfg(feature = "sandbox")]
+        if let Some(root) = &root {
+            if !self.demo && self.capabilities.active(capabilities::SANDBOX) {
+                config.sandbox = Some(self.sandbox.binding(root.clone()));
+            }
+        }
         #[cfg(feature = "spill")]
         let spill_plugin = self.spill.as_ref().map(|s| {
             let plugin = s.plugin();
@@ -162,8 +183,26 @@ impl Factory {
             )));
             plugin
         });
-        let mut builder = HostBuilder::new()
-            .checkpoint_sink(Arc::new(sessions::SessionSink(self.store.clone())))?;
+        #[cfg(feature = "sandbox")]
+        let sink: Arc<dyn CheckpointSink> = Arc::new(crate::sandbox_setup::ProductSink(self.store.clone()));
+        #[cfg(all(feature = "planner", not(feature = "sandbox")))]
+        let sink: Arc<dyn CheckpointSink> = Arc::new(crate::planning::PlanningSink(self.store.clone()));
+        #[cfg(not(any(feature = "planner", feature = "sandbox")))]
+        let sink: Arc<dyn CheckpointSink> = Arc::new(sessions::SessionSink(self.store.clone()));
+        let mut builder = HostBuilder::new().checkpoint_sink(sink)?;
+        #[cfg(feature = "sandbox")]
+        if let Some(binding) = &config.sandbox {
+            builder = builder.context_transform(Arc::new(crate::sandbox_setup::SandboxContext(binding.clone())));
+        }
+        #[cfg(feature = "planner")]
+        if root.is_some() && !self.demo && self.capabilities.active(capabilities::PLANNER) {
+            let planning_tools: std::collections::BTreeSet<String> = ["read", "ls", "grep", "find", "memory_read", "session_search", "session_read"].into_iter().map(String::from).collect();
+            let planner = planner::Planner::new(planner::PlannerConfig {
+                planning_tools,
+                ..Default::default()
+            })?;
+            builder = builder.plugin(Arc::new(planner.plugin()));
+        }
         if root.is_some() {
             for tool in tools::core_tools(&config) {
                 builder = builder.tool(tool);
@@ -233,8 +272,23 @@ impl Factory {
         if let Some(model) = &self.fixed {
             builder = builder.model(model.clone());
         }
+        // Last read-only transform observes the actual post-compaction request estimate.
+        #[cfg(feature = "subagent")]
+        let child_driver = if root.is_some() && !self.demo && self.capabilities.active(capabilities::SUBAGENT) {
+            let driver = crate::subagent_setup::LocalDriver::new(
+                #[cfg(feature = "model-management")] self.manager.clone(),
+                cfg!(feature = "planner") && self.capabilities.active(capabilities::PLANNER));
+            builder = builder.plugin(Arc::new(self.subagents.service.binding(driver.clone()).plugin()));
+            for name in ["spawn_agent", "send_message", "followup_agent", "interrupt_agent"] { builder = builder.allow_side_effect_tool(name); }
+            Some(driver)
+        } else { None };
+        if root.is_some() { builder = builder.context_transform(self.context_meter.clone()); }
         let host = builder.build().await?;
         let runtime: Arc<dyn AgentRuntime> = Arc::new(host.engine());
+        #[cfg(feature = "subagent")]
+        let child_runtime = sessions::runtime(runtime.clone(), self.store.clone());
+        #[cfg(feature = "subagent")]
+        if let Some(driver) = child_driver { driver.bind(&child_runtime)?; }
         #[cfg(feature = "model-management")]
         let runtime = if let Some(manager) = &self.manager {
             manager.runtime(runtime)
@@ -244,12 +298,16 @@ impl Factory {
         let runtime = sessions::runtime(runtime, self.store.clone());
         Ok(Arc::new(Environment {
             runtime,
+            #[cfg(feature = "subagent")]
+            _child_runtime: child_runtime,
             host: AsyncMutex::new(host),
         }))
     }
 }
 struct Environment {
     runtime: Arc<dyn AgentRuntime>,
+    #[cfg(feature = "subagent")]
+    _child_runtime: Arc<dyn AgentRuntime>,
     host: AsyncMutex<Host>,
 }
 struct HeldRun {
@@ -451,11 +509,16 @@ impl Environments {
         history: Vec<Message>,
     ) -> application::ApplicationResult<application::StartResponse> {
         let store = self.factory.store.clone();
-        let header = tokio::task::spawn_blocking(move || store.header(&parent_session))
+        let parent = tokio::task::spawn_blocking(move || store.get(&parent_session))
             .await
             .map_err(|_| application::ApplicationError::new(
                 application::ApplicationErrorCode::Internal, "会话读取失败。"
             ))??;
+        #[cfg(feature = "sandbox")]
+        let sandbox_metadata = self.factory.sandbox.metadata(&parent, !self.factory.demo && self.factory.capabilities.active(capabilities::SANDBOX))?;
+        #[cfg(not(feature = "sandbox"))]
+        crate::sandbox_setup::require_unconfined(&parent)?;
+        let header = parent.header;
         let cwd = settings.bound_root(Path::new(&header.workspace)).map_err(|e| {
             application::ApplicationError::new(application::ApplicationErrorCode::InvalidRequest, e.message)
         })?;
@@ -464,11 +527,19 @@ impl Environments {
             application::ApplicationError::new(application::ApplicationErrorCode::Internal, "目录绑定失败。")
         })?.insert(binding_id.clone(), environment);
         let binding = Binding { runtime: self.runtime.clone(), id: binding_id.clone() };
-        let metadata = std::collections::BTreeMap::from([
+        let mut metadata = std::collections::BTreeMap::from([
             (HOST_WORKSPACE_KEY.into(), binding_id),
             #[cfg(feature = "history-search")]
             (HOST_HISTORY_SESSION_KEY.into(), header.id),
         ]);
+        #[cfg(feature = "planner")]
+        {
+            // A temporary side thread must not inherit the parent's mutable plan or mode.
+            metadata.insert(planner::PLAN_SEED_KEY.into(), serde_json::to_string(&planner::PlanSnapshot::default())
+                .map_err(|_| application::ApplicationError::new(application::ApplicationErrorCode::Internal, "计划初始化失败。"))?);
+        }
+        #[cfg(feature = "sandbox")]
+        metadata.extend(sandbox_metadata);
         let result = app.start_task_with_history(request, history, metadata);
         drop(binding);
         result
@@ -476,13 +547,18 @@ impl Environments {
     pub async fn shutdown(&self) -> Result<()> {
         let mut gate = self.admission.lock().await;
         *gate = true;
+        #[cfg(feature = "subagent")]
+        self.factory.subagents.service.shutdown().await?;
         let mut pool = self.pool.lock().await;
         let keys: Vec<_> = pool.keys().cloned().collect();
         for key in keys {
             pool[&key].host.lock().await.shutdown().await?;
             pool.remove(&key);
         }
-        self.runtime.default.host.lock().await.shutdown().await
+        self.runtime.default.host.lock().await.shutdown().await?;
+        #[cfg(feature = "sandbox")]
+        self.factory.sandbox.provider.shutdown().await.map_err(config_error)?;
+        Ok(())
     }
 }
 

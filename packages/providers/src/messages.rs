@@ -330,6 +330,8 @@ pub(crate) struct MessagesDecoder {
     finish: Option<FinishReason>,
     input: Option<u64>,
     output_tokens: Option<u64>,
+    cache_read_tokens: Option<u64>,
+    cache_write_tokens: Option<u64>,
     private_bytes: usize,
 }
 impl MessagesDecoder {
@@ -345,6 +347,8 @@ impl MessagesDecoder {
             finish: None,
             input: None,
             output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             private_bytes: 0,
         }
     }
@@ -366,14 +370,15 @@ impl MessagesDecoder {
         };
         if initial {
             if let Some(input) = number("input_tokens")? {
-                let read = number("cache_read_input_tokens")?.unwrap_or(0);
-                let created = number("cache_creation_input_tokens")?.unwrap_or(0);
-                self.input = Some(
-                    input
-                        .checked_add(read)
-                        .and_then(|v| v.checked_add(created))
-                        .ok_or_else(|| protocol_error("token count overflow"))?,
-                );
+                // Messages input_tokens excludes cache traffic. Invalid cache
+                // counts would make the budget total unknowable, so remain strict.
+                let read = number("cache_read_input_tokens")?;
+                let created = number("cache_creation_input_tokens")?.or_else(|| read.map(|_| 0));
+                self.input = Some(input.checked_add(read.unwrap_or(0))
+                    .and_then(|n| n.checked_add(created.unwrap_or(0)))
+                    .ok_or_else(|| protocol_error("token count overflow"))?);
+                self.cache_read_tokens = read;
+                self.cache_write_tokens = created;
             }
         }
         if let Some(tokens) = number("output_tokens")? {
@@ -386,6 +391,8 @@ impl MessagesDecoder {
             (Some(input_tokens), Some(output_tokens)) => vec![ModelEvent::Usage(Usage {
                 input_tokens,
                 output_tokens,
+                cache_read_tokens: self.cache_read_tokens,
+                cache_write_tokens: self.cache_write_tokens,
             })],
             _ => vec![],
         })

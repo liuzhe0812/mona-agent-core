@@ -20,11 +20,11 @@ use tower_http::cors::CorsLayer;
 /// Default Web composition: encrypted local settings, seeded once from existing model env.
 /// Deployments should provide a separate stable AGENT_MODEL_STORE_KEY; the initial provider
 /// key is a convenient fallback for local development and must remain stable across restarts.
-pub fn from_environment() -> Result<ModelManager, Box<dyn std::error::Error>> {
+pub fn from_environment(store_key: Option<String>) -> Result<ModelManager, Box<dyn std::error::Error>> {
     let api_key = std::env::var("AGENT_MODEL_KEY")
         .ok()
         .filter(|v| !v.is_empty());
-    let key = std::env::var("AGENT_MODEL_STORE_KEY").ok().or_else(|| api_key.clone())
+    let key = store_key.or_else(|| std::env::var("AGENT_MODEL_STORE_KEY").ok()).or_else(|| api_key.clone())
         .ok_or("model management requires AGENT_MODEL_STORE_KEY (at least 16 random characters); use AGENT_MODEL_MANAGEMENT=0 for fixed-model mode")?;
     let path = match std::env::var_os("AGENT_MODEL_SETTINGS_PATH") {
         Some(value) => PathBuf::from(value),
@@ -106,7 +106,7 @@ pub fn router(
         .allow_methods([Method::GET, Method::POST])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     if let Some(origin) = origin {
-        if origin == "*" || !(origin.starts_with("https://") || origin.starts_with("http://")) {
+        if origin == "*" || !crate::ui_origin_allowed(&origin) {
             return Err("management requires an explicit HTTP(S) origin".into());
         }
         cors = cors.allow_origin(origin.parse::<HeaderValue>()?);

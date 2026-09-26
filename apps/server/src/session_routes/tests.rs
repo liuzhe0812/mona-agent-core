@@ -27,7 +27,7 @@ impl Model for RememberModel {
         Ok(Box::pin(futures_util::stream::iter(vec![
             Ok(ModelEvent::Text(text)), Ok(ModelEvent::Reasoning("PRIVATE_REASONING".into())),
             Ok(ModelEvent::ProviderData { target: ProtocolTarget::Assistant, data: ProviderData { namespace: "test".into(), value: json!({"signature":"PRIVATE_REPLAY"}) } }),
-            Ok(ModelEvent::Finish(FinishReason::Stop)), Ok(ModelEvent::Usage(Usage { input_tokens: 10, output_tokens: 2 })), Ok(ModelEvent::End),
+            Ok(ModelEvent::Finish(FinishReason::Stop)), Ok(ModelEvent::Usage(Usage { input_tokens: 10, output_tokens: 2, cache_read_tokens: None, cache_write_tokens: None })), Ok(ModelEvent::End),
         ])))
     }
 }
@@ -58,7 +58,7 @@ fn checkpoint(id: &str, key: &str, messages: Vec<Message>) -> RunCheckpoint {
     RunCheckpoint { schema_version: CHECKPOINT_VERSION, run_id: "fixture-run".into(), revision: 1,
         phase: CheckpointPhase::BeforeModel, step: 1, transcript: messages, pending_tools: BTreeMap::new(), selected_tools: vec![],
         model_options: ModelOptions::default(), metadata: BTreeMap::from([(SESSION_KEY.into(), id.into()), (TURN_KEY.into(), key.into())]),
-        task_usage: TaskUsage { model_calls: 1, reported_tokens: 3, usage_complete: true }, status: None, error: None }
+        task_usage: TaskUsage { model_calls: 1, reported_tokens: 3, usage_complete: true }, statistics: RunStatistics::default(), status: None, error: None }
 }
 
 #[tokio::test]
@@ -111,5 +111,4 @@ async fn host_routes_require_auth_and_never_accept_client_history_or_limits() {
     let body = response.into_body().collect().await.unwrap().to_bytes(); assert!(serde_json::from_slice::<serde_json::Value>(&body).unwrap()["id"].is_string());
     service.app.shutdown(Duration::from_secs(2)).await.unwrap(); host.shutdown().await.unwrap();
 }
-
 

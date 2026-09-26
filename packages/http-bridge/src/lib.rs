@@ -37,7 +37,7 @@ pub fn router(app: AgentApplication, config: HttpConfig) -> ApplicationResult<Ro
     }
     let mut origins = vec![];
     for origin in config.allowed_origins {
-        if origin == "*" || !(origin.starts_with("https://") || origin.starts_with("http://")) {
+        if origin == "*" || !(origin == "tauri://localhost" || origin.starts_with("https://") || origin.starts_with("http://")) {
             return Err(ApplicationError::new(ApplicationErrorCode::InvalidRequest, "CORS requires explicit HTTP(S) origins"));
         }
         origins.push(HeaderValue::from_str(&origin).map_err(|_| ApplicationError::new(ApplicationErrorCode::InvalidRequest, "invalid CORS origin"))?);

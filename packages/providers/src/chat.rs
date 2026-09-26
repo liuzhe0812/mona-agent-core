@@ -562,7 +562,31 @@ fn decode_chunk(data: &str) -> Result<Vec<ModelEvent>> {
     let mut events = vec![];
     if let Some(usage) = value.get("usage") {
         if let (Some(input), Some(output)) = (usage["prompt_tokens"].as_u64(), usage["completion_tokens"].as_u64()) {
-            events.push(ModelEvent::Usage(Usage { input_tokens: input, output_tokens: output }));
+            // Chat Completions reports cache buckets as subsets of prompt_tokens.
+            // They are optional telemetry: malformed or inconsistent buckets must
+            // not invalidate otherwise usable token totals or the model response.
+            let cache_read = usage["prompt_tokens_details"]["cached_tokens"]
+                .as_u64()
+                .or_else(|| usage["prompt_cache_hit_tokens"].as_u64())
+                .or_else(|| usage["cached_tokens"].as_u64());
+            let cache_write = usage["prompt_tokens_details"]["cache_write_tokens"].as_u64()
+                .or_else(|| (cache_read.is_some() && usage["prompt_tokens_details"].get("cache_write_tokens").is_none()).then_some(0));
+            let (cache_read, cache_write) = match (cache_read, cache_write) {
+                (Some(read), Some(write))
+                    if read.checked_add(write).is_none_or(|n| n > input) =>
+                {
+                    (None, None)
+                }
+                (Some(read), _) if read > input => (None, None),
+                (_, Some(write)) if write > input => (None, None),
+                buckets => buckets,
+            };
+            events.push(ModelEvent::Usage(Usage {
+                input_tokens: input,
+                output_tokens: output,
+                cache_read_tokens: cache_read,
+                cache_write_tokens: cache_write,
+            }));
         }
     }
     let choices = value.get("choices").and_then(Value::as_array)
@@ -644,7 +668,7 @@ mod tests {
             let raw = format!("data: {first}\n\ndata: {{\"choices\":[],\"usage\":{{\"prompt_tokens\":8,\"completion_tokens\":3}}}}\n\ndata: {{\"error\":{{\"code\":\"server_error\"}}}}\n\n");
             let events = coalesced_stream(raw).collect::<Vec<_>>().await;
             assert!(events[0].is_ok(), "content must not disappear behind the later error");
-            assert!(events.iter().any(|event| matches!(event, Ok(ModelEvent::Usage(Usage { input_tokens: 8, output_tokens: 3 })))));
+            assert!(events.iter().any(|event| matches!(event, Ok(ModelEvent::Usage(Usage { input_tokens: 8, output_tokens: 3, .. })))));
             let error = events.last().unwrap().as_ref().unwrap_err();
             assert_eq!(error.code, ErrorCode::ModelServer);
             assert!(error.model_output_started);
@@ -661,8 +685,66 @@ mod tests {
 
     #[test]
     fn usage_only_frame_is_supported() {
-        let events = decode_chunk(r#"{"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":3}}"#).unwrap();
-        assert!(matches!(events.as_slice(), [ModelEvent::Usage(Usage { input_tokens: 8, output_tokens: 3 })]));
+        let events = decode_chunk(
+            r#"{"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":3}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            events.as_slice(),
+            [ModelEvent::Usage(Usage {
+                input_tokens: 8,
+                output_tokens: 3,
+                cache_read_tokens: None,
+                cache_write_tokens: None
+            })]
+        ));
+    }
+    #[test]
+    fn cache_usage_supports_provider_variants_and_ignores_invalid_buckets() {
+        for (usage, expected_read, expected_write) in [
+            (
+                json!({"prompt_tokens":100,"completion_tokens":4,"prompt_tokens_details":{"cached_tokens":70,"cache_write_tokens":10}}),
+                Some(70),
+                Some(10),
+            ),
+            (
+                json!({"prompt_tokens":100,"completion_tokens":4,"prompt_cache_hit_tokens":60}),
+                Some(60),
+                Some(0),
+            ),
+            (
+                json!({"prompt_tokens":100,"completion_tokens":4,"cached_tokens":50}),
+                Some(50),
+                Some(0),
+            ),
+            (
+                json!({"prompt_tokens":100,"completion_tokens":4,"prompt_tokens_details":{"cached_tokens":"bad","cache_write_tokens":10}}),
+                None,
+                Some(10),
+            ),
+            (
+                json!({"prompt_tokens":100,"completion_tokens":4,"prompt_tokens_details":{"cached_tokens":80,"cache_write_tokens":30}}),
+                None,
+                None,
+            ),
+            (
+                json!({"prompt_tokens":100,"completion_tokens":4,"prompt_tokens_details":{"cached_tokens":101}}),
+                None,
+                None,
+            ),
+        ] {
+            let frame = json!({"choices":[],"usage":usage}).to_string();
+            let events = decode_chunk(&frame).unwrap();
+            assert!(matches!(
+                events.as_slice(),
+                [ModelEvent::Usage(Usage {
+                    input_tokens: 100,
+                    output_tokens: 4,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                })] if *cache_read_tokens == expected_read && *cache_write_tokens == expected_write
+            ));
+        }
     }
     #[test]
     fn provider_error_classification_uses_identifiers_and_strict_messages() {

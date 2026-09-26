@@ -206,6 +206,32 @@ impl Directory {
         }
         Ok(path)
     }
+    /// Cheap authorized metadata for UI file references; never loads or hashes file contents.
+    /// Opening/reading the file must still revalidate the path and content revision.
+    pub fn stat(&self, relative: &str) -> Result<Entry> {
+        let path = self.resolve(relative)?;
+        let meta = fs::symlink_metadata(&path).map_err(io)?;
+        if is_link(&meta) {
+            return Err(error("forbidden", "不允许读取链接或宿主私有目录。"));
+        }
+        let kind = if meta.is_file() {
+            "file"
+        } else if meta.is_dir() {
+            "directory"
+        } else {
+            "other"
+        };
+        Ok(Entry {
+            name: path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_owned(),
+            path: relative.to_owned(),
+            kind: kind.into(),
+            bytes: meta.len(),
+        })
+    }
     pub fn list(
         &self,
         relative: &str,
@@ -418,6 +444,27 @@ mod tests {
         assert_eq!(dir.read("data.bin", 0, 64, None).unwrap().kind, "binary");
     }
     #[test]
+    fn metadata_is_authorized_and_does_not_require_reading_a_preview() {
+        let root = tempfile::tempdir().unwrap();
+        let private = root.path().join("state");
+        fs::create_dir(&private).unwrap();
+        fs::write(private.join("secret"), "key").unwrap();
+        let file = fs::File::create(root.path().join("large.bin")).unwrap();
+        file.set_len(20 * 1024 * 1024).unwrap();
+        drop(file);
+        let dir = Directory::open(root.path()).unwrap().excluding([private]);
+        let entry = dir.stat("large.bin").unwrap();
+        assert_eq!(entry.kind, "file");
+        assert_eq!(entry.name, "large.bin");
+        assert_eq!(entry.bytes, 20 * 1024 * 1024);
+        assert!(dir.read("large.bin", 0, 4, None).is_err());
+        assert_eq!(dir.stat("state/secret").unwrap_err().code, "forbidden");
+        for path in ["../secret", "/etc/passwd", "C:/private", "x:stream", "x\0y"] {
+            assert!(dir.stat(path).is_err(), "{path:?}");
+        }
+        assert_eq!(dir.stat("missing.txt").unwrap_err().code, "not_found");
+    }
+    #[test]
     fn containment_uses_components_and_windows_case_rules() {
         assert!(contains_path(
             Path::new("/a/state"),
@@ -465,5 +512,6 @@ mod tests {
         let dir = Directory::open(root.path()).unwrap();
         assert_eq!(dir.list("", 0, 10, None).unwrap().entries[0].kind, "link");
         assert!(dir.read("link/secret", 0, 64, None).is_err());
+        assert!(dir.stat("link/secret").is_err());
     }
 }

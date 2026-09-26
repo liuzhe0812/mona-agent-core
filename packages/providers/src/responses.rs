@@ -588,9 +588,17 @@ impl Decoder for ResponsesDecoder {
                     let output_tokens = usage["output_tokens"]
                         .as_u64()
                         .ok_or_else(|| protocol_error("invalid output usage"))?;
+                    // Responses cached tokens are a subset of input_tokens. Keep
+                    // this optional detail only when it is well-formed and within
+                    // the reported total; total usage remains authoritative.
+                    let cache_read_tokens = usage["input_tokens_details"]["cached_tokens"]
+                        .as_u64()
+                        .filter(|tokens| *tokens <= input_tokens);
                     events.push(ModelEvent::Usage(Usage {
                         input_tokens,
                         output_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens: cache_read_tokens.map(|_| 0),
                     }));
                 }
                 let finish = if kind == "response.incomplete" {

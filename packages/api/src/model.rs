@@ -7,8 +7,12 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Usage {
+    /// Provider-reported prompt total, including tokens read from or written to cache.
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Prompt-side subsets. None means the provider did not report that bucket.
+    pub cache_read_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
 }
 impl Usage {
     pub fn total(&self) -> u64 {

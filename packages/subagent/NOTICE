@@ -1,0 +1,13 @@
+OpenAI Codex
+Copyright 2025 OpenAI
+
+src/execution.rs is adapted from:
+https://github.com/openai/codex/blob/aa380897f67b91e1a47d530d7286d497b6726d3f/codex-rs/core/src/agent/control/execution.rs
+
+Modifications by Mona contributors: fixed explicit concurrency limit; atomic
+check-and-reserve; API-independent RAII permit and local regression tests.
+The adapted file is Apache-2.0; see LICENSE-CODEX. Other original Mona files
+remain under the repository MIT license. This crate contains both licenses.
+
+Only the execution limiter is derived here. Codex's Ratatui/TUI-derived files,
+thread manager, model protocol, rollout storage and CLI are not included.

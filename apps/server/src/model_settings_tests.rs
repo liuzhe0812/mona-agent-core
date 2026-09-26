@@ -1,9 +1,8 @@
 #![cfg(feature = "model-management")]
 
-// The integration test exercises the management router; environment composition belongs to the server binary.
-#[allow(dead_code)]
-#[path = "../src/model_settings.rs"]
-mod management;
+// Exercise the actual library router and its shared origin policy, without recompiling
+// the production module into a second crate with a different crate root.
+use crate::model_settings as management;
 
 use api::{AgentExecutor, Result, RunRequest, RunStatus};
 use axum::{

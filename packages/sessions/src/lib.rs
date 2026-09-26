@@ -7,7 +7,7 @@ mod store;
 
 pub use error::{SessionError, SessionErrorCode, SessionResult};
 pub use lifecycle::{runtime, SessionSink};
-pub use store::{Document, Header, Listing, Prepared, Status, Store, Turn, SESSION_KEY, TURN_KEY};
+pub use store::{validate_id, Document, Header, HostState, Listing, Prepared, Status, Store, Turn, SESSION_KEY, TURN_KEY};
 #[cfg(feature = "search")]
 pub use store::search;
 

@@ -17,6 +17,17 @@ fn digest(messages: &[Message]) -> Result<String> {
     ))
 }
 impl Document {
+    pub(super) fn origin_len(&self) -> Result<usize> {
+        match self.body.state.get("sessions.origin") {
+            None => Ok(0),
+            Some(value) => {
+                if value.as_object().is_none_or(|o| o.len() != 2)
+                    || value.get("version").and_then(|v| v.as_u64()) != Some(1) { return Err(corrupt()); }
+                value.get("messages").and_then(|v| v.as_u64())
+                    .and_then(|n| usize::try_from(n).ok()).ok_or_else(corrupt)
+            }
+        }
+    }
     pub(super) fn working_history(&self) -> Result<Vec<Message>> {
         let mut messages = self
             .body
@@ -64,8 +75,8 @@ impl Document {
         messages.retain(|message| !matches!(message, Message::System { .. }));
         if self.body.base.is_some() {
             if self.body.checkpoint.is_none() {
-                let turn = self.body.turns.last().ok_or_else(corrupt)?;
-                messages.push(Message::user(&turn.prompt));
+                if let Some(turn) = self.body.turns.last() { messages.push(Message::user(&turn.prompt)); }
+                else if messages.len() != self.origin_len()? { return Err(corrupt()); }
             }
         } else if !self.body.turns.is_empty()
             || self.body.checkpoint.is_some()
@@ -107,7 +118,7 @@ impl Document {
             Ok(working)
         }
     }
-    fn next_workset(&self, use_compaction: bool) -> Result<Vec<Message>> {
+    pub(super) fn next_workset(&self, use_compaction: bool) -> Result<Vec<Message>> {
         if !use_compaction {
             return self.history();
         }
@@ -159,6 +170,48 @@ impl Document {
     }
 }
 impl Store {
+    /// Seed a newly created session with a trusted, settled history and extension state.
+    /// This is not a completed Run and adds no fabricated turn or usage. No replacement of
+    /// existing turns is allowed. The entire seed and state are acknowledged together.
+    pub fn initialize_history(&self, id: &str, revision: u64, history: Vec<Message>, state: HostState) -> Result<Header> {
+        if history.iter().any(|m| matches!(m, Message::System { .. }))
+            || serde_json::to_vec(&history).map_err(io_error)?.len() > 4 * 1024 * 1024 {
+            return Err(error(Code::InvalidRequest, "初始历史必须是有界的非 System 正式消息。"));
+        }
+        if !history.is_empty() { api::validate_messages(&history).map_err(|_| error(Code::InvalidRequest, "初始历史工具配对无效。"))?; }
+        if state.contains_key("sessions.origin") { return Err(error(Code::InvalidRequest, "初始历史身份由存储维护。")); }
+        validate_state(&state)?;
+        let _guard = self.gate.lock().map_err(io_error)?;
+        let mut doc = self.load(id)?;
+        Self::editable(&doc, revision)?;
+        if !doc.body.turns.is_empty() || !doc.body.state.is_empty() || doc.body.base.is_some() {
+            return Err(error(Code::Conflict, "只能初始化全新空会话，不能替换已有记录。"));
+        }
+        doc.body.state = state;
+        if !history.is_empty() {
+            doc.body.state.insert("sessions.origin".into(), serde_json::json!({"version":1,"messages":history.len()}));
+            let fingerprint = digest(&history)?;
+            doc.body.archive = history.clone();
+            doc.body.base = Some(RunBase { input_messages: history.len(), input_sha256: fingerprint.clone(),
+                archive_sha256: fingerprint, pending_history: Some(history) });
+        }
+        self.save(&mut doc, None)?;
+        Ok(doc.header)
+    }
+    /// Mutate only auxiliary communication state, including while a Run is active.
+    /// The pure callback must not re-enter Store; it receives the exact previous value.
+    /// Execution policies must use idle-only update_state, never this aux.* namespace.
+    pub fn update_auxiliary_state(&self, id: &str, key: &str,
+        update: impl FnOnce(Option<&serde_json::Value>) -> Result<serde_json::Value>) -> Result<Header> {
+        if !key.starts_with("aux.") { return Err(error(Code::InvalidRequest, "辅助状态必须使用 aux. 名称空间。")); }
+        let _guard = self.gate.lock().map_err(io_error)?;
+        let mut doc = self.load(id)?;
+        let next = update(doc.body.state.get(key))?;
+        if doc.body.state.get(key) == Some(&next) { return Ok(doc.header); }
+        doc.body.state.insert(key.into(), next);
+        self.save(&mut doc, None)?;
+        Ok(doc.header)
+    }
     #[cfg(feature = "compaction")]
     pub fn attach_compactor(&self, compactor: compaction::Compactor) -> Result<()> {
         let mut installed = self.compactor.lock().map_err(io_error)?;

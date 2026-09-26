@@ -114,6 +114,7 @@ struct Document {
 }
 
 struct BoundModel {
+    selection: Selection,
     adapter: Arc<dyn Model>,
     model: String,
 }
@@ -553,21 +554,35 @@ impl ModelManager {
         Arc::new(ManagedRuntime {
             runtime,
             manager: self.clone(),
+            selection: None,
         })
     }
 
-    fn bind(&self) -> Result<Binding> {
+    /// Trusted host selection for a separate runtime; never changes the product default.
+    pub fn runtime_for(&self, runtime: Arc<dyn AgentRuntime>, selection: Selection) -> Arc<ManagedRuntime> {
+        Arc::new(ManagedRuntime { runtime, manager: self.clone(), selection: Some(selection) })
+    }
+    /// Safe route identity of an already pinned Run. Opaque routing keys are not UI model names.
+    pub fn bound_selection(&self, options: &ModelOptions) -> Result<Selection> {
+        options.model.as_ref().and_then(|id| lock(&self.inner.router.bindings).get(id).map(|b| b.selection.clone()))
+            .ok_or_else(|| invalid("model route is no longer pinned"))
+    }
+    #[cfg(test)]
+    fn bind(&self) -> Result<Binding> { self.bind_selected(None) }
+    fn bind_selected(&self, requested: Option<&Selection>) -> Result<Binding> {
         let doc = lock(&self.inner.document);
-        let selection = doc
-            .default
-            .as_ref()
+        let selection = requested.or(doc.default.as_ref())
             .ok_or_else(|| invalid("configure a default model before starting a task"))?;
         let provider = doc
             .providers
             .iter()
             .find(|p| p.id == selection.provider_id)
             .ok_or_else(|| invalid("default provider missing"))?;
+        if !provider.models.iter().any(|m| m.id == selection.model_id && m.enabled) {
+            return Err(invalid("selected model is missing or disabled"));
+        }
         let bound = Arc::new(BoundModel {
+            selection: selection.clone(),
             adapter: self.adapter(provider, &selection.model_id)?,
             model: selection.model_id.clone(),
         });
@@ -690,13 +705,14 @@ impl Drop for Binding {
 pub struct ManagedRuntime {
     runtime: Arc<dyn AgentRuntime>,
     manager: ModelManager,
+    selection: Option<Selection>,
 }
 impl AgentRuntime for ManagedRuntime {
     fn validate_history(&self, messages: &[Message], options: &ModelOptions) -> Result<()> {
         if options.model.is_some() {
             return Err(invalid("ManagedRuntime selects the configured default; per-run override is not enabled"));
         }
-        let binding = self.manager.bind()?;
+        let binding = self.manager.bind_selected(self.selection.as_ref())?;
         let mut effective = options.clone();
         effective.model = Some(binding.id.clone());
         self.manager.inner.router.validate_history(messages, &effective)?;
@@ -710,7 +726,7 @@ impl AgentRuntime for ManagedRuntime {
         }
         let executor = tokio::runtime::Handle::try_current()
             .map_err(|_| invalid("a Tokio runtime is required"))?;
-        let binding = self.manager.bind()?;
+        let binding = self.manager.bind_selected(self.selection.as_ref())?;
         request.model_options.model = Some(binding.id.clone());
         self.manager.inner.router.validate_history(&request.messages, &request.model_options)?;
         let handle = self.runtime.start(request)?;
@@ -928,6 +944,22 @@ mod tests {
         drop(old);
         drop(new);
         assert!(lock(&manager.inner.router.bindings).is_empty());
+    }
+
+    #[test]
+    fn explicit_host_selection_is_frozen_and_does_not_mutate_default() {
+        let manager = ModelManager::open(Arc::new(Store::default()), false).unwrap();
+        manager.upsert(input(0, "one")).unwrap();
+        let selection = Selection { provider_id: "one".into(), model_id: "second".into() };
+        let bound = manager.bind_selected(Some(&selection)).unwrap();
+        let options = ModelOptions { model: Some(bound.id.clone()), ..Default::default() };
+        assert_eq!(manager.bound_selection(&options).unwrap(), selection);
+        assert_eq!(manager.view().revision, 1);
+        assert_eq!(manager.view().default.unwrap().model_id, "first");
+        manager.set_visibility(1,"one",Some("second"),false).unwrap();
+        assert!(manager.bind_selected(Some(&selection)).is_err());
+        assert_eq!(manager.bound_selection(&options).unwrap(), selection);
+        drop(bound); assert!(manager.bound_selection(&options).is_err());
     }
 
     #[tokio::test]

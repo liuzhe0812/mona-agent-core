@@ -28,7 +28,7 @@ impl Model for RecoveryModel {
         };
         Ok(Box::pin(futures_util::stream::iter(vec![
             Ok(ModelEvent::Text(text)),
-            Ok(ModelEvent::Usage(Usage { input_tokens: if summary { 100_000 } else { 10 }, output_tokens: 5 })),
+            Ok(ModelEvent::Usage(Usage { input_tokens: if summary { 100_000 } else { 10 }, output_tokens: 5, cache_read_tokens: None, cache_write_tokens: None })),
             Ok(ModelEvent::Finish(FinishReason::Stop)), Ok(ModelEvent::End),
         ])))
     }

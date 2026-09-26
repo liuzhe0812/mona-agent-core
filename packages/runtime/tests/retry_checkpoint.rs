@@ -87,7 +87,7 @@ struct UsageFailure;
 impl Model for UsageFailure {
     async fn stream(&self, _: ModelRequest, _: CancellationToken) -> Result<ModelStream> {
         Ok(Box::pin(futures_util::stream::iter(vec![
-            Ok(ModelEvent::Usage(Usage { input_tokens: 10, output_tokens: 0 })),
+            Ok(ModelEvent::Usage(Usage { input_tokens: 10, output_tokens: 0, cache_read_tokens: None, cache_write_tokens: None })),
             Err(AgentError::new(ErrorCode::ModelServer, "temporary after usage")),
         ])))
     }

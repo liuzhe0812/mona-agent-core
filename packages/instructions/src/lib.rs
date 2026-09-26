@@ -95,6 +95,11 @@ impl ProjectInstructions {
                 part => normalized.push(part.as_os_str()),
             }
         }
+        // A historical tool call can name a path outside the workspace. Do not
+        // inspect that path: it may be inaccessible, and cannot add project rules.
+        if !lexically_within(&normalized, &self.root) {
+            return Ok(None);
+        }
         // Resolve the closest existing parent for a not-yet-created write target.
         let mut ancestor = normalized.as_path();
         let mut missing = Vec::new();
@@ -255,6 +260,33 @@ impl ProjectInstructions {
             vec![ContextBlock::new("project.instructions", body)],
             fingerprints,
         ))
+    }
+}
+
+fn lexically_within(path: &Path, root: &Path) -> bool {
+    #[cfg(not(windows))]
+    {
+        path.starts_with(root)
+    }
+    #[cfg(windows)]
+    {
+        fn ordinary(path: &Path) -> String {
+            let value = path.to_string_lossy();
+            if let Some(unc) = value.strip_prefix(r"\\?\UNC\") {
+                format!(r"\\{unc}")
+            } else {
+                value.strip_prefix(r"\\?\").unwrap_or(&value).to_owned()
+            }
+        }
+        let path = ordinary(path);
+        let root = ordinary(root);
+        path.get(..root.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(&root))
+            && (path.len() == root.len()
+                || root.ends_with('\\')
+                || path
+                    .get(root.len()..)
+                    .is_some_and(|suffix| suffix.starts_with('\\')))
     }
 }
 #[async_trait]

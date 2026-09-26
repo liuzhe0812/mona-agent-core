@@ -7,7 +7,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -56,12 +56,14 @@ impl Default for TaskLimits {
 }
 
 struct TaskInner {
+    parent: Option<TaskControl>,
     cancel: CancellationToken,
     deadline: Instant,
     limits: TaskLimits,
     calls: AtomicU64,
     tokens: AtomicU64,
     usage_incomplete: AtomicBool,
+    statistics: Mutex<RunStatistics>,
 }
 #[derive(Clone)]
 pub struct TaskControl(Arc<TaskInner>);
@@ -73,12 +75,28 @@ impl Default for TaskControl {
 impl TaskControl {
     pub fn new(limits: TaskLimits) -> Self {
         Self(Arc::new(TaskInner {
+            parent: None,
             cancel: CancellationToken::new(),
             deadline: Instant::now() + limits.wall_time,
             limits,
             calls: AtomicU64::new(0),
             tokens: AtomicU64::new(0),
             usage_incomplete: AtomicBool::new(false),
+            statistics: Mutex::new(RunStatistics::default()),
+        }))
+    }
+    /// A separately cancellable accounting branch under the same root quota and deadline.
+    /// Usage/timing roll up; context observations remain local to their branch.
+    pub fn branch(&self) -> Self {
+        Self(Arc::new(TaskInner {
+            parent: Some(self.clone()),
+            cancel: self.cancellation().child_token(),
+            deadline: self.deadline(),
+            limits: self.0.limits.clone(),
+            calls: AtomicU64::new(0),
+            tokens: AtomicU64::new(0),
+            usage_incomplete: AtomicBool::new(false),
+            statistics: Mutex::new(RunStatistics::default()),
         }))
     }
     pub fn cancel(&self) {
@@ -91,6 +109,7 @@ impl TaskControl {
         self.0.deadline
     }
     pub fn check(&self) -> Result<()> {
+        if let Some(parent) = &self.0.parent { parent.check()?; }
         if self.0.cancel.is_cancelled() {
             return Err(AgentError::new(ErrorCode::Cancelled, "task cancelled"));
         }
@@ -118,6 +137,7 @@ impl TaskControl {
     /// Kept separate from check() so the last permitted successful call can finish.
     pub fn check_model_call_available(&self) -> Result<()> {
         self.check()?;
+        if let Some(parent) = &self.0.parent { return parent.check_model_call_available(); }
         if self.0.calls.load(Ordering::SeqCst) >= self.0.limits.max_model_calls {
             return Err(AgentError::new(
                 ErrorCode::Limit,
@@ -128,6 +148,11 @@ impl TaskControl {
     }
     pub fn reserve_model_call(&self) -> Result<()> {
         self.check()?;
+        if let Some(parent) = &self.0.parent {
+            parent.reserve_model_call()?;
+            self.0.calls.fetch_add(1, Ordering::SeqCst);
+            return Ok(());
+        }
         let max = self.0.limits.max_model_calls;
         self.0
             .calls
@@ -142,6 +167,36 @@ impl TaskControl {
         Ok(())
     }
     pub fn record_usage(&self, usage: Option<Usage>) {
+        self.record_attempt(usage, None);
+    }
+    pub fn record_model_attempt(&self, usage: Option<Usage>, elapsed: Duration,
+        first_token: Option<Duration>, output_tokens: Option<u64>) {
+        self.record_attempt(usage, Some((elapsed, first_token, output_tokens)));
+    }
+    fn record_attempt(&self, usage: Option<Usage>, timing: Option<(Duration, Option<Duration>, Option<u64>)>) {
+        let mut guarded = self.0.statistics.lock().ok();
+        if let Some(stats) = guarded.as_deref_mut() {
+            if let Some(value) = usage {
+                stats.input_tokens = stats.input_tokens.saturating_add(value.input_tokens);
+                stats.output_tokens = stats.output_tokens.saturating_add(value.output_tokens);
+                stats.cache_read_tokens = stats.cache_read_tokens.and_then(|total| value.cache_read_tokens.map(|n| total.saturating_add(n)));
+                stats.cache_write_tokens = stats.cache_write_tokens.and_then(|total| value.cache_write_tokens.map(|n| total.saturating_add(n)));
+            } else {
+                stats.cache_read_tokens = None;
+                stats.cache_write_tokens = None;
+            }
+            if let Some((elapsed, first_token, output_tokens)) = timing {
+                stats.model_time_ms = stats.model_time_ms.saturating_add(elapsed.as_millis().min(u64::MAX as u128) as u64);
+                if let Some(first) = first_token {
+                    stats.ttft_ms = stats.ttft_ms.saturating_add(first.as_millis().min(u64::MAX as u128) as u64);
+                    stats.ttft_samples = stats.ttft_samples.saturating_add(1);
+                    if let Some(tokens) = output_tokens {
+                        stats.decode_ms = stats.decode_ms.saturating_add(elapsed.saturating_sub(first).as_millis().min(u64::MAX as u128) as u64);
+                        stats.decode_tokens = stats.decode_tokens.saturating_add(tokens);
+                    }
+                }
+            }
+        }
         if let Some(usage) = usage {
             let _ = self
                 .0
@@ -152,9 +207,15 @@ impl TaskControl {
         } else {
             self.0.usage_incomplete.store(true, Ordering::SeqCst);
         }
+        drop(guarded);
+        if let Some(parent) = &self.0.parent { parent.record_attempt(usage, timing); }
     }
     pub fn mark_usage_incomplete(&self) {
-        self.0.usage_incomplete.store(true, Ordering::SeqCst);
+        {
+            let _hold = self.0.statistics.lock().ok();
+            self.0.usage_incomplete.store(true, Ordering::SeqCst);
+        }
+        if let Some(parent) = &self.0.parent { parent.mark_usage_incomplete(); }
     }
     pub fn usage(&self) -> TaskUsage {
         TaskUsage {
@@ -163,6 +224,66 @@ impl TaskControl {
             usage_complete: !self.0.usage_incomplete.load(Ordering::SeqCst),
         }
     }
+    /// Presentation telemetry never participates in execution limits or cancellation.
+    pub fn statistics(&self) -> RunStatistics {
+        self.0.statistics.lock().map(|stats| stats.clone()).unwrap_or_default()
+    }
+    pub fn accounting(&self) -> (TaskUsage, RunStatistics) {
+        let stats = self.0.statistics.lock().ok();
+        (self.usage(), stats.map(|value| value.clone()).unwrap_or_default())
+    }
+    pub fn record_tool_timing(&self, elapsed: Duration) {
+        if let Ok(mut stats) = self.0.statistics.lock() {
+            stats.tool_time_ms = stats.tool_time_ms.saturating_add(elapsed.as_millis().min(u64::MAX as u128) as u64);
+        }
+        if let Some(parent) = &self.0.parent { parent.record_tool_timing(elapsed); }
+    }
+    pub fn record_context(&self, context: ContextUsage) {
+        if let Ok(mut stats) = self.0.statistics.lock() { stats.context = Some(context); }
+    }
+    pub fn anchor_context(&self, input_tokens: u64) {
+        if let Ok(mut stats) = self.0.statistics.lock() {
+            if let Some(context) = &mut stats.context {
+                context.tokens = Some(input_tokens);
+                context.provider_anchored = true;
+            }
+        }
+    }
+}
+
+/// Generic, cumulative facts for one Run. Missing cache buckets stay unknown.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RunStatistics {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
+    pub model_time_ms: u64,
+    pub tool_time_ms: u64,
+    pub ttft_ms: u64,
+    pub ttft_samples: u64,
+    pub decode_ms: u64,
+    pub decode_tokens: u64,
+    pub context: Option<ContextUsage>,
+}
+impl Default for RunStatistics {
+    fn default() -> Self {
+        Self { input_tokens: 0, output_tokens: 0, cache_read_tokens: Some(0), cache_write_tokens: Some(0),
+            model_time_ms: 0, tool_time_ms: 0, ttft_ms: 0, ttft_samples: 0, decode_ms: 0,
+            decode_tokens: 0, context: None }
+    }
+}
+
+/// Latest primary-request context observation; component counts are estimates.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ContextUsage {
+    pub tokens: Option<u64>,
+    pub capacity: Option<u64>,
+    pub provider_anchored: bool,
+    pub observed_at: u64,
+    pub system_tokens: Option<u64>,
+    pub tool_tokens: Option<u64>,
+    pub message_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -331,6 +452,7 @@ pub struct RunReport {
     pub transcript: Vec<Message>,
     pub model_requests: Vec<RequestAudit>,
     pub task_usage: TaskUsage,
+    pub statistics: RunStatistics,
     pub steps: usize,
     #[serde(default)]
     pub checkpoint: CheckpointStatus,

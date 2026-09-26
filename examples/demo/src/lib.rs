@@ -14,11 +14,11 @@ impl Model for ScriptedModel {
 }
 pub fn text(text: &str) -> Vec<ModelEvent> {
     vec![ModelEvent::Text(text.into()), ModelEvent::Finish(FinishReason::Stop),
-        ModelEvent::Usage(Usage { input_tokens: 20, output_tokens: 10 }), ModelEvent::End]
+        ModelEvent::Usage(Usage { input_tokens: 20, output_tokens: 10, cache_read_tokens: None, cache_write_tokens: None }), ModelEvent::End]
 }
 pub fn call(id: &str, name: &str, arguments: Value) -> Vec<ModelEvent> {
     vec![ModelEvent::ToolDelta { index: 0, id: Some(id.into()), name: Some(name.into()), arguments: arguments.to_string() },
-        ModelEvent::Finish(FinishReason::ToolCalls), ModelEvent::Usage(Usage { input_tokens: 20, output_tokens: 10 }), ModelEvent::End]
+        ModelEvent::Finish(FinishReason::ToolCalls), ModelEvent::Usage(Usage { input_tokens: 20, output_tokens: 10, cache_read_tokens: None, cache_write_tokens: None }), ModelEvent::End]
 }
 pub struct Add;
 #[async_trait]
