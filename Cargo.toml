@@ -6,7 +6,7 @@ members = [
   "packages/memory", "packages/planner", "packages/compaction", "packages/spill", "packages/tools", "examples/demo",
   "packages/application", "packages/http-bridge", "packages/tauri-bridge", "apps/server",
   "examples/tauri-composition", "packages/models", "packages/skills",
-  "packages/workspace", "packages/projects", "packages/sandbox", "packages/subagent"
+  "packages/workspace", "packages/projects", "packages/sandbox", "packages/subagent", "apps/desktop"
 ]
 
 # Default build excludes both transport bridges and composition examples.

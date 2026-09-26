@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev:web": "node scripts/dev-web.mjs",
+    "dev:desktop": "node scripts/dev-desktop.mjs",
     "check:web:design": "node scripts/check-web-design.mjs",
     "test:web": "node --test apps/web/ui/subagent.test.mjs apps/web/ui/commands.test.mjs apps/web/ui/sandbox.test.mjs apps/web/layout-geometry.test.mjs apps/web/pane-layout.test.mjs apps/web/ui/registry.test.mjs scripts/dev-web.test.mjs apps/web/capabilities.test.mjs apps/web/content-renderer.test.mjs apps/web/conversation-rail.test.mjs apps/web/conversation-policy.test.mjs apps/web/design-system.test.mjs apps/web/model-settings.test.mjs apps/web/run-view.test.mjs apps/web/spill.test.mjs apps/web/sessions.test.mjs apps/web/theme.test.mjs apps/web/workspace.test.mjs apps/web/memory.test.mjs apps/web/memory-ui.test.mjs",
     "test:web:design": "node apps/web/test/design-system-e2e.mjs",

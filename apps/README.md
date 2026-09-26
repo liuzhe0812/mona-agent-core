@@ -5,6 +5,7 @@
 | App | Responsibility |
 |---|---|
 | [server](server/README.md) | HTTP composition root: capability policy, package assembly, management interfaces and workspace-scoped local conversations |
+| [desktop](desktop/README.md) | Tauri desktop host: reuses the server composition and Web UI, adds native folder selection |
 | [web](web/README.md) | Formal framework-free UI for task interaction, persisted conversation navigation and settings |
 
 The Web application's visual contract is maintained in [UI design](../docs/ui/DESIGN.zh-CN.md), [component contracts](../docs/ui/COMPONENTS.zh-CN.md), [design governance](../docs/ui/DESIGN-GOVERNANCE.zh-CN.md), and the [production surface inventory](../docs/ui/DESIGN-INVENTORY.zh-CN.md).

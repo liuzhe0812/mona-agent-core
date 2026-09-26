@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Mona",
+  "identifier": "com.mona.agent",
+  "build": {
+    "frontendDist": "dist",
+    "beforeDevCommand": "node ../scripts/build-desktop-assets.mjs",
+    "beforeBuildCommand": "node ../scripts/build-desktop-assets.mjs"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [{ "label": "main", "title": "Mona", "url": "index.html?monaDesktop=1", "width": 1280, "height": 820, "minWidth": 320, "minHeight": 480 }],
+    "security": {
+      "capabilities": ["main"],
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* https:; worker-src 'self' blob:; frame-src 'self' blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": ["icons/icon.png", "icons/icon.ico", "icons/icon.icns"]
+  }
+}
