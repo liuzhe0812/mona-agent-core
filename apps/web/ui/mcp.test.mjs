@@ -1,0 +1,5 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { parseMcpJson,validateMcpView } from './mcp-view.mjs';
+test('MCP tool filters distinguish none from all and reject malformed values',()=>{assert.equal(parseMcpJson('','filter'),null);assert.deepEqual(parseMcpJson('[]','filter'),[]);assert.deepEqual(parseMcpJson('{"Authorization":"Bearer secret"}','object'),{Authorization:'Bearer secret'});assert.throws(()=>parseMcpJson('{"a":3}','object'));assert.throws(()=>parseMcpJson('{}','list'));});
+test('MCP management refuses saved credentials and invalid active states',()=>{const v={version:1,revision:0,enabled:true,restart_required:false,servers:[{id:'demo',config:{enabled:false,transport:{type:'stdio'}},env_keys:[],header_keys:[]}],status:[]};assert.equal(validateMcpView(v),v);assert.throws(()=>validateMcpView({...v,revision:-1}));const bad=structuredClone(v);bad.servers[0].config.transport.env={secret:'hidden'};assert.throws(()=>validateMcpView(bad));assert.throws(()=>validateMcpView({...v,servers:[...v.servers,...v.servers]}));});

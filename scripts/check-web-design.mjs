@@ -23,8 +23,8 @@ const RUNTIME_JS = [
   'apps/web/run-view.mjs', 'apps/web/content-renderer.mjs', 'apps/web/sessions-ui.mjs', 'apps/web/tooltip.mjs',
   'apps/web/conversation-rail.mjs', 'apps/web/workspace-ui.mjs', 'apps/web/right-pane.mjs', 'apps/web/side-conversation.mjs',
   'apps/web/memory-ui.mjs',
-  ...['registry','host','client','shell','commands','command-menu','dom','catalog','plan-view','subagent-view'].map(id => `apps/web/ui/${id}.mjs`),
-  ...['models','capabilities','appearance','memory','workspace','workbench','side','metrics','details','planner','sandbox','subagent'].map(id => `apps/web/ui/modules/${id}.mjs`),
+  ...['registry','host','client','shell','commands','command-menu','dom','catalog','plan-view','subagent-view','mcp-view'].map(id => `apps/web/ui/${id}.mjs`),
+  ...['models','capabilities','appearance','memory','workspace','workbench','side','metrics','details','planner','sandbox','subagent','mcp'].map(id => `apps/web/ui/modules/${id}.mjs`),
 ];
 const REQUIRED_DECLARATIONS = Object.freeze({
   '--ui-control-sm': '32px', '--ui-control-md': '36px', '--ui-control-lg': '40px',

@@ -6,8 +6,9 @@ license.workspace = true
 publish = false
 
 [features]
+mcp = ["dep:mcp", "dep:models", "dep:getrandom"]
 subagent = ["dep:subagent"]
-default = ["model-management", "skills", "compaction", "spill", "projects", "memory", "history-search", "planner", "sandbox", "subagent"]
+default = ["model-management", "skills", "compaction", "spill", "projects", "memory", "history-search", "planner", "sandbox", "subagent", "mcp"]
 model-management = ["dep:models"]
 skills = ["dep:skills"]
 compaction = ["dep:compaction", "sessions/compaction"]
@@ -19,6 +20,8 @@ planner = ["dep:planner"]
 sandbox = ["dep:sandbox", "tools/sandbox"]
 
 [dependencies]
+mcp = { workspace = true, optional = true }
+getrandom = { version = "0.2", optional = true }
 subagent = { workspace = true, optional = true }
 sandbox = { workspace = true, optional = true }
 planner = { workspace = true, optional = true }

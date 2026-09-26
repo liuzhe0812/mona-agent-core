@@ -3,6 +3,8 @@ use application::{AgentApplication, ApplicationConfig};
 use std::{future::Future, time::Duration};
 
 mod capabilities;
+#[cfg(feature = "mcp")]
+mod mcp_setup;
 mod sandbox_setup;
 #[cfg(feature = "subagent")]
 mod subagent_setup;

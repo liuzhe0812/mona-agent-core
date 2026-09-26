@@ -1,5 +1,6 @@
 //! Web-only session routes, safe projections and deployment path selection.
 mod view;
+#[cfg(feature = "mcp")] mod mcp;
 #[cfg(feature = "subagent")] mod subagents;
 #[cfg(test)] mod tests;
 
@@ -129,6 +130,11 @@ pub fn router(
         Ok(metadata)
     }));
     let router = Router::new();
+    #[cfg(feature = "mcp")]
+    let router = router.route("/api/mcp", get(mcp::settings))
+        .route("/api/mcp/servers", post(mcp::upsert))
+        .route("/api/mcp/delete", post(mcp::remove))
+        .route("/api/mcp/reconnect", post(mcp::reconnect));
     #[cfg(feature = "subagent")]
     let router = router.route("/api/subagents", get(subagents::settings).post(subagents::save_settings))
         .route("/api/sessions/{id}/agents", get(subagents::list))

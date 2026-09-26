@@ -40,6 +40,8 @@ fn config_error(e: impl std::fmt::Display) -> AgentError {
 }
 
 pub struct Factory {
+    #[cfg(feature = "mcp")]
+    pub mcp: Arc<crate::mcp_setup::McpHost>,
     pub store: Arc<sessions::Store>,
     pub context_meter: Arc<crate::conversation_metrics::ContextMeter>,
     pub capabilities: capabilities::CapabilityManager,
@@ -72,7 +74,7 @@ impl Factory {
         let _ = &model_store_key;
         #[cfg(feature = "model-management")]
         let manager = if !demo && capabilities.active("model-management") {
-            Some(crate::model_settings::from_environment(model_store_key).map_err(config_error)?)
+            Some(crate::model_settings::from_environment(model_store_key.clone()).map_err(config_error)?)
         } else {
             None
         };
@@ -135,8 +137,12 @@ impl Factory {
         } else { None };
         #[cfg(feature = "subagent")]
         let subagents = crate::subagent_setup::SubagentHost::from_environment(store.clone(), demo)?;
+        #[cfg(feature = "mcp")]
+        let mcp = crate::mcp_setup::McpHost::from_environment(model_store_key, capabilities.active(capabilities::MCP), demo).await?;
         Ok(Self {
             store,
+            #[cfg(feature = "mcp")]
+            mcp,
             #[cfg(feature = "subagent")]
             subagents,
             context_meter: Arc::new(crate::conversation_metrics::ContextMeter::default()),
@@ -196,7 +202,10 @@ impl Factory {
         }
         #[cfg(feature = "planner")]
         if root.is_some() && !self.demo && self.capabilities.active(capabilities::PLANNER) {
-            let planning_tools: std::collections::BTreeSet<String> = ["read", "ls", "grep", "find", "memory_read", "session_search", "session_read"].into_iter().map(String::from).collect();
+            #[allow(unused_mut)]
+            let mut planning_tools: std::collections::BTreeSet<String> = ["read", "ls", "grep", "find", "memory_read", "session_search", "session_read"].into_iter().map(String::from).collect();
+            #[cfg(feature = "mcp")]
+            planning_tools.extend(self.mcp.service.read_only_names());
             let planner = planner::Planner::new(planner::PlannerConfig {
                 planning_tools,
                 ..Default::default()
@@ -217,6 +226,11 @@ impl Factory {
             for name in ["shell", "edit", "write"] {
                 builder = builder.allow_side_effect_tool(name);
             }
+        }
+        #[cfg(feature = "mcp")]
+        if root.is_some() && !self.demo && self.capabilities.active(capabilities::MCP) {
+            for tool in self.mcp.service.tools() { let spec=tool.spec(); if spec.side_effects { builder=builder.allow_side_effect_tool(spec.name); } }
+            builder=builder.plugin(Arc::new(self.mcp.service.plugin())).policy(Arc::new(crate::mcp_setup::ExternalPolicy));
         }
         #[cfg(feature = "memory")]
         if let (Some(root), Some(memory)) = (&root, &self.memory) {
@@ -556,6 +570,8 @@ impl Environments {
             pool.remove(&key);
         }
         self.runtime.default.host.lock().await.shutdown().await?;
+        #[cfg(feature = "mcp")]
+        self.factory.mcp.service.shutdown().await?;
         #[cfg(feature = "sandbox")]
         self.factory.sandbox.provider.shutdown().await.map_err(config_error)?;
         Ok(())

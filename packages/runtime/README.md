@@ -28,6 +28,8 @@ host.shutdown().await?;
 
 工具参数在派发前按 JSON Schema 校验，失败结果最多包含四条字段路径和原因，总计不超过 1024 字节，不回显参数值。数值约束给出 Schema 中的具体边界，例如 `/limit: must be > 0`；嵌套位置使用 JSON Pointer，例如 `/edits/0/newText: expected string`。执行工具数量由 `MAX_TOOL_CALLS_PER_STEP` 与 Run 限额控制；UI 快照的 256 项保留量只影响展示，Runtime 单独保留活动项直到结算。
 
+工具 Schema 可用 `$schema` 明确声明 Draft 7、2019-09 或 2020-12，未声明时保持 Draft 7。未知方言和外部 `$ref/$dynamicRef/$recursiveRef` 在注册时拒绝，不通过网络解析。MCP 等适配器负责补上其协议默认方言，执行器继续使用同一个参数校验入口。
+
 静态参数、模型可见工具和宿主授权先预检。动态 `ToolPolicy` 对每个实际候选调用只检查一次，位于 intent 确认之后、工具派发之前；因此前一个独占工具修改规则后，同批后续工具会重新判断。拒绝和检查失败记录为未执行结果，保存失败仍停止后续动作。intent 不等于工具已派发；这不是跨 Run、外部进程或文件系统的原子事务。
 
 `execute()` 统一使用 `RunHandle::wait_owned()`：拥有者 Future 被丢弃即取消该 Run，不取消共享任务或其他 Run。`start()` 句柄和普通 `wait()` 是非拥有型观察入口，丢弃或断线不自动取消。

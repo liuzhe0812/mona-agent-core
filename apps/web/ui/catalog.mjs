@@ -1,5 +1,6 @@
 // Explicit build-time product catalog. Server IDs select these functions, never arbitrary URLs.
 export const catalog = Object.freeze({
+  mcp: { load: () => import('./modules/mcp.mjs') },
   appearance: { local: true, load: () => import('./modules/appearance.mjs') },
   details: { local: true, load: () => import('./modules/details.mjs') },
   'conversation-rail': { local: true, load: () => import('./modules/conversation-rail.mjs') },

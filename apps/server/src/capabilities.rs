@@ -30,6 +30,7 @@ pub const HISTORY_SEARCH: &str = "history-search";
 pub const PLANNER: &str = "planner";
 pub const SANDBOX: &str = "sandbox";
 pub const SUBAGENT: &str = "subagent";
+pub const MCP: &str = "mcp";
 pub const GREP: &str = "grep";
 pub const FIND: &str = "find";
 pub const LS: &str = "ls";
@@ -81,7 +82,7 @@ impl Default for DeploymentFile {
                 user_configurable: true,
             },
         );
-        for (id, enabled) in [(MEMORY, cfg!(feature = "memory")), (HISTORY_SEARCH, cfg!(feature = "history-search")), (PLANNER, cfg!(feature = "planner")), (SANDBOX, cfg!(feature = "sandbox")), (SUBAGENT, cfg!(feature = "subagent")), (MEMORY_UPDATE, false)] {
+        for (id, enabled) in [(MEMORY, cfg!(feature = "memory")), (HISTORY_SEARCH, cfg!(feature = "history-search")), (PLANNER, cfg!(feature = "planner")), (SANDBOX, cfg!(feature = "sandbox")), (SUBAGENT, cfg!(feature = "subagent")), (MCP, cfg!(feature = "mcp")), (MEMORY_UPDATE, false)] {
             capabilities.insert(id.into(), CapabilityPolicy { enabled, user_configurable: true });
         }
         for id in FIXED_TOOLS {
@@ -182,6 +183,7 @@ impl CapabilityManager {
                     | PLANNER
                     | SANDBOX
                     | SUBAGENT
+                    | MCP
                     | "read"
                     | "shell"
                     | "edit"
@@ -358,6 +360,7 @@ fn compiled(id: &str) -> bool {
         PLANNER => cfg!(feature = "planner"),
         SANDBOX => cfg!(feature = "sandbox"),
         SUBAGENT => cfg!(feature = "subagent"),
+        MCP => cfg!(feature = "mcp"),
         "read" | "shell" | "edit" | "write" | GREP | FIND | LS | INSTRUCTIONS => true,
         _ => false,
     }
@@ -378,6 +381,7 @@ struct Metadata {
 
 fn manageable_metadata() -> Vec<Metadata> {
     vec![
+        Metadata { id: MCP, name: "MCP", description: "连接本地或远程 MCP 服务，按宿主配置使用外部工具和资源。", kind: CapabilityKind::Component },
         Metadata { id: SUBAGENT, name: "子 Agent", description: "有限并行委派，父子共用预算和权限边界；保留独立记录。", kind: CapabilityKind::Component },
         Metadata { id: SANDBOX, name: "本地沙箱", description: "限制 Agent Shell 与文件修改；模式由输入框选择，不限制读取和联网。", kind: CapabilityKind::Component },
         Metadata { id: PLANNER, name: "计划管理", description: "同一个 Agent 按需维护计划；显式计划模式只调研，普通任务不额外审批。", kind: CapabilityKind::Component },
@@ -511,6 +515,9 @@ pub fn from_environment(args: &[String]) -> Result<CapabilityManager, Box<dyn st
             },
         );
     }
+    if std::env::var("AGENT_MCP").as_deref() == Ok("0") {
+        deployment.capabilities.insert(MCP.into(), CapabilityPolicy { enabled: false, user_configurable: false });
+    }
     if std::env::var("AGENT_SUBAGENT").as_deref() == Ok("0") {
         deployment.capabilities.insert(SUBAGENT.into(), CapabilityPolicy { enabled: false, user_configurable: false });
     }
@@ -614,6 +621,7 @@ async fn ui_modules(State(manager): State<CapabilityManager>) -> Json<serde_json
     if cfg!(feature = "planner") { modules.push("planner"); }
     if cfg!(feature = "sandbox") { modules.push("sandbox"); }
     if cfg!(feature = "subagent") { modules.push("subagent"); }
+    if cfg!(feature = "mcp") { modules.push("mcp"); }
     Json(serde_json::json!({"version":1,"modules":modules,"capabilities":manager.assembly()}))
 }
 

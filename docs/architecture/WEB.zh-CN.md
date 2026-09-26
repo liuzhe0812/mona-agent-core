@@ -271,6 +271,14 @@ flowchart LR
 
 配套 UI 通过 `settings`、`right.pane`、`tool.view` 注册；显示实际角色、模型、状态、用量和执行片段。权限始终与父任务当前工具集合相交，Planner/Sandbox 的约束不能通过子任务绕过；角色的空工具集合与继承不同。共享目录不提供自动工作树或冲突合并，业务成功仍由主 Agent 核对。完整能力、来源许可和嵌入方法见 [Subagent](../../packages/subagent/README.md)。
 
+### MCP 应用装配
+
+Server 的可选 `mcp` feature 默认提供管理能力，初始无服务器。`mcp_setup` 保存独立加密配置，MCP Service 在启动时建立连接，各工作区 Host 复用同一目录和连接。外部进程的 cwd、环境与凭据由宿主指定，不从模型参数接受。
+
+`GET /api/mcp` 返回公开配置、凭据键名、revision、重启状态和实际工具；`POST /api/mcp/servers`、`/delete` 以修订保护保存，`/reconnect` 显式重连当前已装配身份。修改端点或程序身份不得隐式转用旧凭据，配置改变不在活动 Run 中热换工具。
+
+配套 `ui/modules/mcp.mjs` 注册 settings，展示两种连接表单、过滤、只读声明、当前目录及错误。UI 卸载不关闭共享 MCP；停用扩展保留配置但不连接外部服务器。接口、范围、系统依赖和限制见 [MCP](../../packages/mcp/README.md)。
+
 ## 11. 二次开发入口
 
 | 需求 | 首选入口 |

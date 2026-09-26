@@ -18,6 +18,7 @@
 | `side-conversation` | 右栏 + → 侧边对话 | `side-conversation.mjs`、`workspace.css` | governed | right-pane-e2e |
 | `subagent-panel` | 右栏 → 子 Agent，独立任务与执行片段 | `ui/modules/subagent.mjs`、`ui/subagent-view.mjs`、`ui/extensions.css` | governed | subagent unit、subagent-e2e |
 | `settings-subagent` | 设置 → 子 Agent，并发/角色/模型/工具上限 | `ui/modules/subagent.mjs`、`ui/extensions.css` | governed | subagent unit、subagent-e2e |
+| `settings-mcp` | 设置 → MCP，本地/远程配置与实际工具目录 | `ui/modules/mcp.mjs`、`ui/mcp-view.mjs`、`ui/extensions.css` | governed | mcp unit、mcp-e2e |
 | `task-search` | 品牌旁搜索 / Ctrl+K | `index.html`、`styles.css`、`sessions-ui.mjs` | governed | sidebar、sessions |
 | `new-task-home` | 居中 LOGO、标题与共用输入器 | `index.html`、`styles.css`、`shell-layout.mjs` | governed | design、new-task |
 | `chat-stream` | 提交任务后 | `run-view.mjs`、`content-renderer.mjs`、`styles.css` | governed | design、themes、renderer |

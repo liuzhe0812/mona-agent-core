@@ -82,6 +82,22 @@
 .subagent-inherit-tools { display: flex; align-items: center; gap: var(--ui-space-2); font-size: var(--ui-text-13); color: var(--text-secondary); }
 .subagent-inherit-tools input { width: var(--ui-text-16); height: var(--ui-text-16); }
 .subagent-field textarea { min-height: 100px; resize: vertical; padding: var(--ui-space-2); }
+.mcp-toolbar { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); margin-block: var(--ui-space-3); }
+.mcp-server-list, .mcp-form, .mcp-transport, .mcp-tools { display: grid; gap: var(--ui-space-3); min-width: 0; max-width: 720px; }
+.mcp-form { margin-top: var(--ui-space-4); }
+.mcp-form[hidden], .mcp-transport[hidden] { display: none; }
+.mcp-field { display: grid; gap: var(--ui-space-1-5); min-width: 0; font-size: var(--ui-text-13); color: var(--text-secondary); }
+.mcp-field input, .mcp-field select, .mcp-field textarea { width: 100%; min-width: 0; color: var(--text-primary); }
+.mcp-field textarea { padding: var(--ui-space-2); resize: vertical; font-family: var(--ui-font-mono); }
+.mcp-toggle { display: flex; align-items: center; gap: var(--ui-space-2); font-size: var(--ui-text-13); color: var(--text-secondary); }
+.mcp-toggle input { width: var(--ui-text-16); height: var(--ui-text-16); }
+.mcp-server-row { display: flex; justify-content: space-between; gap: var(--ui-space-3); flex-wrap: wrap; padding: var(--ui-space-3); border: var(--ui-border) solid var(--border-default); border-radius: var(--ui-radius-container); background: var(--surface); text-align: left; min-width: 0; }
+.mcp-server-row[aria-pressed='true'] { background: var(--surface-selected); }
+.mcp-server-row strong { font-size: var(--ui-text-13); font-weight: var(--ui-weight-medium); }
+.mcp-server-row span, .mcp-tool-row { font-size: var(--ui-text-12); color: var(--text-secondary); overflow-wrap: anywhere; }
+.mcp-tool-row { display: grid; gap: var(--ui-space-1); padding-block: var(--ui-space-2); border-bottom: var(--ui-border) solid var(--border-default); }
+.mcp-tool-row p { margin: 0; }
+.mcp-tools h3 { font-size: var(--ui-text-14); font-weight: var(--ui-weight-medium); }
 @container (max-width: 460px) {
   .permission-trigger-label { display: none; }
 }

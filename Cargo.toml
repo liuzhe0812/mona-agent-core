@@ -6,7 +6,7 @@ members = [
   "packages/memory", "packages/planner", "packages/compaction", "packages/spill", "packages/tools", "examples/demo",
   "packages/application", "packages/http-bridge", "packages/tauri-bridge", "apps/server",
   "examples/tauri-composition", "packages/models", "packages/skills",
-  "packages/workspace", "packages/projects", "packages/sandbox", "packages/subagent", "apps/desktop"
+  "packages/workspace", "packages/projects", "packages/sandbox", "packages/subagent", "packages/mcp", "apps/desktop"
 ]
 
 # Default build excludes both transport bridges and composition examples.
@@ -37,6 +37,7 @@ sessions = { path = "packages/sessions" }
 instructions = { path = "packages/instructions" }
 sandbox = { path = "packages/sandbox" }
 subagent = { path = "packages/subagent" }
+mcp = { path = "packages/mcp" }
 base64 = "0.22"
 async-trait = "0.1.86"
 serde = { version = "1.0.217", features = ["derive", "rc"] }

@@ -18,6 +18,12 @@
 
 结果和截图位于 `target/subagent-validation/browser`；测试失败不以假后端降级，退出只清理本次创建的进程和目录。Windows 测试目录位于用户 `LOCALAPPDATA/mona-agent-core/subagent-tests`，不修改日常工作区 ACL。浏览器与平台原生工具的运行证据只适用于执行该测试的环境，不代表其他操作系统、原生桌面 WebView 或真实模型任务质量。纯 UI 契约与空工具上限检查纳入 `npm run test:web`。
 
+## MCP
+
+先构建 `cargo build -p server`，再运行 `npm run test:web:mcp`。正式 Web/宿主连接真实 SDK stdio 子进程和 Streamable HTTP 协议 peer，由受控模型验证实际调用、参数拒绝、工具错误、资源、权限、取消、加密配置、凭据不回显、重启与停用。构建复用 target/debug，端口、配置和浏览器 profile 隔离，不连接用户第三方服务或付费模型。
+
+结果与截图位于 `target/mcp-validation/browser`；协议 peer 位于 `packages/mcp/tests/fixture.mjs`，不属于正式入口。其他操作系统、第三方服务和桌面 WebView 不因此视为已验收。包内与 Runtime schema 测试有独立入口，UI 数据检查纳入 `npm run test:web`。
+
 ## 本机沙箱
 
 先 `cargo build -p server`，再 `npm run test:web:sandbox`。测试调用当前操作系统的真实沙箱，覆盖 Shell 与 write/edit 的文件边界、只读读取、显式不受限操作、会话模式保存/重启、并发版本拒绝、原生子进程取消、临时目录清理、关闭组件后的拒绝降级及部署锁定。模型仅为受控端点；缺少平台后端时测试失败，不以假后端或跳过充当原生验证。

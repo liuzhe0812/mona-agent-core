@@ -40,6 +40,14 @@ Memory 与历史检索分别由 `memory` / `history-search` Cargo feature 默认
 
 `GET /api/sessions/{root}/agents` 及 `/{child}` 返回根会话内子任务和分页安全过程；`message/followup` 必须绑定仍活动的父 Run 与幂等请求身份，`interrupt` 必须匹配所见子 Run。顶层导航不列出子记录，普通会话启动接口不接受直接续跑子记录。主任务结束后的继续由新的主任务明确派发；停用组件、刷新和重启只恢复记录，不自动执行。关闭宿主先排空父子任务，再清理沙箱及底层 Runtime。
 
+## MCP
+
+`mcp` 为默认可选 feature，初始服务器列表为空，`AGENT_MCP=0` 锁定停用。`mcp_setup` 在启动时建立共享 SDK 连接；关闭时先排空父子任务和工作环境，再关闭 MCP。stdio 程序须预先安装，不根据模型参数动态安装或更换。
+
+`GET /api/mcp`、`POST /api/mcp/servers`、`/api/mcp/delete` 和 `/api/mcp/reconnect` 复用鉴权、CORS 与有界请求。配置使用独立 `mcp-settings.enc`，可用 `AGENT_MCP_SETTINGS_PATH` 指定路径。密钥优先取 `AGENT_MCP_STORE_KEY`、显式应用密钥或 `AGENT_MODEL_STORE_KEY`，均未提供时在宿主目录生成独立 `.key`。复用 Models 的加密存储，不要求启用模型管理界面；密文与密钥同目录仍依赖文件权限保护。
+
+配置变更和工具目录变化重启生效；页面只返回 env/header 的键名，不返回值，换端点或程序身份不能自动沿用旧凭据。宿主声明的只读工具可进入 Planner，其他 MCP 工具在只读 Sandbox 模式中被拒绝；MCP 进程和远端服务本身不受本机沙箱隔离。完整协议边界见 [MCP](../../packages/mcp/README.md)。
+
 ## 本地沙箱
 
 `sandbox` 为默认可选 feature，配套 Tools 使用 `tools/sandbox`；当前 Web 默认 `workspace-write`，不加审批。`sandbox_setup` 解析部署配置、在会话接纳时绑定策略，将其交给实际 cwd 的工具；原生实现位于独立 `packages/sandbox`。输入框模式与 Planner 独立，不能用取消沙箱绕过计划模式工具限制。

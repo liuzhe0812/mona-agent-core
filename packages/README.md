@@ -12,6 +12,7 @@
 | [runtime](runtime/README.md) | 唯一执行循环、模型网关、工具调度、累计历史与本轮请求预算、权限与生命周期 | 核心层，可独立嵌入；见 [核心执行机制](../docs/architecture/RUNTIME.zh-CN.md) |
 | [providers](providers/README.md) | Chat Completions / Responses / Messages、能力校验、鉴权及私有历史回传 | 宿主按模型协议选择；见 [模型适配契约](../docs/architecture/EXTENSIONS.zh-CN.md) |
 | [tools](tools/README.md) | 文件、命令和检索工具，以及可注入的流式输出归档接口 | 当前 Web 使用四工具默认组合；其他宿主按场景选择，沿用公共 `Tool` 接口 |
+| [mcp](mcp/README.md) | 官方 SDK 的 stdio/Streamable HTTP 客户端、外部工具和按需资源 | 普通 Service/Tool 或薄 Plugin；宿主配置权限并共享连接，不拥有 Agent 循环 |
 | [sandbox](sandbox/README.md) | 本机文件副作用模式、原生受限进程与直接文件修改检查 | 不依赖 Agent/Core/UI；Tools 可选注入，正式 Web 默认工作区可写，不包含审批 |
 | [models](models/README.md) | 协议与供应商设置、凭据、模型能力、目录及固定运行路由 | 可选模型管理组件，由可信宿主接入 |
 | [sessions](sessions/README.md) | 持久会话、可靠检查点、工作集恢复、归档归属及可选 SQLite 历史检索 | 扩展层；不依赖 Application/HTTP/Runtime 实现，宿主提供目录与授权 |
